@@ -1,0 +1,10 @@
+# dsh-infinite-retry bundle patch:
+# Inserts the plugin into the profile's Cordis container.
+- insert:
+    - id: dsh-infinite-retry
+      name: 'dsh-infinite-retry'
+      config:
+        enabled: true
+        initialDelayMs: 1000
+        maxDelayMs: 60000
+        jitterRatio: 0.2

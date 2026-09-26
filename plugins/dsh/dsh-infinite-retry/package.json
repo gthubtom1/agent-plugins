@@ -1,0 +1,39 @@
+{
+  "name": "dsh-infinite-retry",
+  "version": "1.0.0",
+  "description": "DeepSeek Harness (dsh) 仿 PI-Desktop 无限重试插件：遇网络波动、超时、网关故障与 429 限流时自动持续重试直到成功，自带设置页面 Switch 开关控制，保留指数退避并随时支持手动取消。",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./client.js": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "retry",
+    "infinite-retry",
+    "cordis"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "id": "dsh-infinite-retry",
+    "name": "无限重试",
+    "version": "1.0.0",
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-llm-retry": "*"
+  }
+}
