@@ -2,11 +2,6 @@
  * dsh-infinite-retry
  * 
  * DeepSeek Harness (dsh) 仿 PI-Desktop 无限重试插件（带 UI 开关）
- * 
- * 核心功能：
- * 1. 提供前端 UI 开关控制：在 DSH 设置 → 通用设置中展示「无尽重试」开关，即点即生效，自动落盘。
- * 2. 拦截 `agent/request-error`：当开启时，遇到网络闪断、超时、网关故障与 429 限流，自动转入 DSH 官方 mode: "always" 无限重试模式。
- * 3. 致命错误保护：API Key 错误、参数非法、上下文超长与用户停止时不重试。
  */
 
 export const name = 'dsh-infinite-retry';
@@ -143,6 +138,18 @@ async function readJsonBody(req) {
   }
 }
 
+function safeGetService(ctx, name) {
+  try {
+    return ctx[name];
+  } catch {
+    try {
+      return ctx.get?.(name, false) ?? ctx.reflect?.get?.(name, false);
+    } catch {
+      return undefined;
+    }
+  }
+}
+
 export function apply(ctx, config = {}) {
   let enabled = config.enabled ?? true;
   const initialDelayMs = Number.isFinite(config.initialDelayMs) ? Math.max(100, config.initialDelayMs) : 1000;
@@ -150,9 +157,12 @@ export function apply(ctx, config = {}) {
   const jitterRatio = Number.isFinite(config.jitterRatio) ? Math.max(0, Math.min(1, config.jitterRatio)) : 0.2;
 
   // 1. 注册 HTTP 接口给前端设置页面调用
+  const webServer = safeGetService(ctx, 'webServer');
+  const settings = safeGetService(ctx, 'settings');
+
   const API_PATH = '/infinite-retry/api';
-  if (ctx.webServer && typeof ctx.webServer.register === 'function') {
-    const disposeRoute = ctx.webServer.register({
+  if (webServer && typeof webServer.register === 'function') {
+    const disposeRoute = webServer.register({
       kind: 'prefix',
       path: API_PATH,
       handler: async (req, res) => {
@@ -172,13 +182,10 @@ export function apply(ctx, config = {}) {
             const body = await readJsonBody(req);
             if (typeof body.enabled === 'boolean') {
               enabled = body.enabled;
-              // 尝试通过 DSH settings 机制落盘保存
-              if (ctx.settings && typeof ctx.settings.mutate === 'function') {
+              if (settings && typeof settings.mutate === 'function') {
                 try {
-                  await ctx.settings.mutate('infinite-retry', [{ op: 'set', path: ['enabled'], value: enabled }]);
-                } catch {
-                  // settings namespace 未注册时忽略落盘错误，内存即时生效
-                }
+                  await settings.mutate('infinite-retry', [{ op: 'set', path: ['enabled'], value: enabled }]);
+                } catch {}
               }
             }
             writeJson(res, 200, { ok: true, enabled });
@@ -224,7 +231,7 @@ export function apply(ctx, config = {}) {
     });
 
     return next();
-  }, true); // true = prepend 优先执行
+  }, true);
 
   if (typeof ctx.effect === 'function') {
     ctx.effect(() => () => disposeListener?.(), 'dsh-infinite-retry: request-error listener');
@@ -235,6 +242,11 @@ export function apply(ctx, config = {}) {
   );
 }
 
-export default function plugin(ctx, config) {
-  apply(ctx, config);
-}
+// Cordis 对象插件标准导出（必须携带 inject 与 apply）
+const plugin = {
+  name,
+  inject,
+  apply,
+};
+
+export default plugin;
