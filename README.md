@@ -11,6 +11,7 @@
 | 智能体分类 | 插件名称 | 说明 | 交互能力 | 状态 | 快速直达 |
 |---|---|---|---|---|---|
 | **DSH** | `dsh-infinite-retry` | 仿 PI-Desktop 无限重试插件：遇网络波动/429限流持续重试直到成功 | 自带设置页 Switch 开关 | 🟢 生产就绪 | [查看文档](plugins/dsh/dsh-infinite-retry/README.md) |
+| **Pi Agent** | `pi-infinite-retry` | Pi Coding Agent 无限重试扩展：遇网络抖动/429限流持续重试直到成功 | 斜杠命令 `/retry` | 🟢 生产就绪 | [查看文档](plugins/pi/pi-infinite-retry/README.md) |
 | **PI-Desktop** | *(规划中)* | 面向 PI-Desktop 的原生 `.piplug` 扩展 | Work Panel / Sidecar | 🟡 建设中 | [分类主页](plugins/pi-desktop/README.md) |
 | **Claude Code** | *(规划中)* | 面向 Claude Code 的 MCP 工具与 Hook 增强 | 终端 CLI / Tools | 🟡 建设中 | [分类主页](plugins/claude-code/README.md) |
 | **Codex** | *(规划中)* | 面向 Codex 的本地自动化与环境桥接扩展 | CLI / Runtime | 🟡 建设中 | [分类主页](plugins/codex/README.md) |
@@ -28,6 +29,8 @@ agent-plugins/
 └── plugins/                       # 各智能体专属分类目录
     ├── dsh/                       # DeepSeek Harness 插件
     │   └── dsh-infinite-retry/    # 无限重试插件（带 UI 开关）
+    ├── pi/                        # Pi Coding Agent 扩展
+    │   └── pi-infinite-retry/     # 无限重试扩展（带 /retry 命令）
     ├── pi-desktop/                # PI-Desktop 插件
     ├── claude-code/               # Claude Code 扩展
     ├── codex/                     # Codex 扩展
