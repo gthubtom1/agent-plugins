@@ -1,0 +1,31 @@
+{
+  "name": "agent-plugins",
+  "version": "1.0.0",
+  "description": "多智能体插件库：面向 Pi Coding Agent / Claude Code / Codex / dsh / OpenCode 的插件精选",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "agent-plugins"
+  ],
+  "pi": {
+    "_说明": "本清单让 'pi install git:github.com/gthubtom1/agent-plugins' 一条命令装完所有 PI 侧自制插件。新增插件时记得往这里加。",
+    "extensions": [
+      "./plugins/pi/cmd-guard/cmd-guard.ts",
+      "./plugins/pi/retry-level/retry-level.ts"
+    ],
+    "_extensions_不含": [
+      "./plugins/pi/pi-infinite-retry/index.ts  —— 老的简版 retry，与 retry-level 功能重叠（都注册 /retry）。",
+      "需要它时单独引用，不要与 retry-level 同时启用。"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gthubtom1/agent-plugins.git"
+  },
+  "author": "Toti",
+  "license": "MIT",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

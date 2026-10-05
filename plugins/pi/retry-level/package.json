@@ -1,0 +1,19 @@
+{
+  "name": "pi-retry-level",
+  "version": "1.0.0",
+  "description": "Pi Coding Agent 重试档位扩展：/retry 菜单切档 + 状态栏常显，含无限档（可 Esc 中断）",
+  "main": "retry-level.ts",
+  "keywords": [
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "retry",
+    "retry-level",
+    "infinite-retry"
+  ],
+  "author": "Toti",
+  "license": "MIT",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.0.0"
+  }
+}
