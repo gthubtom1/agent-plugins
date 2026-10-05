@@ -1,0 +1,31 @@
+{
+  "_说明": "cmd-guard 规则 —— VM 版。改完 60 秒内自动生效，或 /guard reload 立即生效。",
+  "_与宿主版的区别": [
+    "blockGui = false —— 客户机里 GUI 工具是正常手段（PE-bear / ImHex / x64dbg GUI 等），不能拦。",
+    "indexPaths 指向本机的 tool-index（C:\\LAB\\...），不是宿主机的 D:\\Project\\...。",
+    "其余（timeout 注入 / 卡死阈值 / 无界命令兜底）与宿主版一致。"
+  ],
+
+  "defaultTimeout": 120,
+  "_timeout说明": "模型不传 timeout 时自动补这个值。探查 30s / 普通 120s / 重活 600s。",
+
+  "probeTimeout": 30,
+  "heavyTimeout": 600,
+  "stallSeconds": 240,
+  "noOutputStallSeconds": 90,
+  "enforce": true,
+
+  "_blockGui说明": "true=物理拦住 GUI 二进制（宿主用）；false=放行但注入 timeout 兜底（客户机用）。",
+  "blockGui": false,
+
+  "_guiBinaries_说明": "手工补充/覆盖 GUI 名单。blockGui=false 时此表不生效。",
+  "guiBinaries": [],
+
+  "_allow_说明": "整条命令含其中任一子串就整条跳过守卫（救急用）。",
+  "allow": ["cmd-guard-skip"],
+
+  "_indexPaths_说明": "技能包索引路径（生成物）。本机在 C:\\LAB 下。",
+  "indexPaths": [
+    "C:\\LAB\\skillpack\\skills\\tool-index.md"
+  ]
+}

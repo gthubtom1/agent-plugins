@@ -1,0 +1,20 @@
+{
+  "_说明": "cmd-guard 规则。改完 60 秒内自动生效，或 /guard reload 立即生效。",
+  "defaultTimeout": 120,
+  "probeTimeout": 30,
+  "heavyTimeout": 600,
+  "stallSeconds": 240,
+  "noOutputStallSeconds": 90,
+  "enforce": true,
+
+  "_guiBinaries_说明": "手工补充/覆盖。优先级：内置基线 < 索引派生 < 本列表。索引(tool-index.md)里标『运行模式=GUI』的行会自动进黑名单，此处只需写索引里没有的，或要覆盖索引判定的手工项。例：把某个索引标 CLI 的工具强制当 GUI，就在这里写它的 exe 名。",
+  "guiBinaries": [],
+
+  "_allow_说明": "整条命令含其中任一子串就整条跳过守卫（救急用，慎用）。",
+  "allow": ["cmd-guard-skip"],
+
+  "_indexPaths_说明": "技能包索引路径（生成物）。索引刷新后守卫自动生效，守卫代码不用改。",
+  "indexPaths": [
+    "D:\\Project\\skills-hub\\integrated-skill-hub\\skills\\tool-index.md"
+  ]
+}

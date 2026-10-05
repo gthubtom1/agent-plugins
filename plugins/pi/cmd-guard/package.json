@@ -1,0 +1,20 @@
+{
+  "name": "pi-cmd-guard",
+  "version": "1.0.0",
+  "description": "Pi Coding Agent 命令执行守卫：自动补 timeout、物理拦截 GUI 二进制、实时显示卡死状态",
+  "main": "cmd-guard.ts",
+  "keywords": [
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "cmd-guard",
+    "timeout",
+    "stall-detection",
+    "gui-block"
+  ],
+  "author": "Toti",
+  "license": "MIT",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.0.0"
+  }
+}

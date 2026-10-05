@@ -21,3 +21,4 @@
 | 插件名称 | 说明 | 交互形式 | 状态 | 快速直达 |
 |---|---|---|---|---|
 | `pi-infinite-retry` | 网络波动/429限流无限重试扩展 | 斜杠命令 `/retry` | 🟢 生产就绪 | [查看文档](pi-infinite-retry/README.md) |
+| `cmd-guard` | 命令执行守卫：补 timeout / 拦 GUI 二进制 / 卡死状态栏 | 斜杠命令 `/guard` `/stall` + 状态栏 | 🟢 生产就绪 | [查看文档](cmd-guard/README.md) |
