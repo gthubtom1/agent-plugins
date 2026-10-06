@@ -9,13 +9,42 @@
 ## 📦 已收录插件清单
 
 | 智能体分类 | 插件名称 | 说明 | 交互能力 | 状态 | 快速直达 |
-|---|---|---|---|---|---|
+|---|---|---|---|---|
+| **Pi Agent** | `cmd-guard` | **命令执行守卫**：自动补 timeout / 物理拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看文档](plugins/pi/cmd-guard/README.md) |
+| **Pi Agent** | `retry-level` | **重试档位**：菜单切档 off/3/5/15/30/无限，状态栏常显 | `/retry [cycle\|status\|N]` | 🟢 生产就绪 | [查看文档](plugins/pi/retry-level/README.md) |
+| **Pi Agent** | `pi-infinite-retry` | Pi Coding Agent 早期简版无限重试扩展（已被 `retry-level` 取代，保留参考） | 斜杠命令 `/retry` | 🟡 已被取代 | [查看文档](plugins/pi/pi-infinite-retry/README.md) |
 | **DSH** | `dsh-infinite-retry` | 仿 PI-Desktop 无限重试插件：遇网络波动/429限流持续重试直到成功 | 自带设置页 Switch 开关 | 🟢 生产就绪 | [查看文档](plugins/dsh/dsh-infinite-retry/README.md) |
-| **Pi Agent** | `pi-infinite-retry` | Pi Coding Agent 无限重试扩展：遇网络抖动/429限流持续重试直到成功 | 斜杠命令 `/retry` | 🟢 生产就绪 | [查看文档](plugins/pi/pi-infinite-retry/README.md) |
 | **PI-Desktop** | *(规划中)* | 面向 PI-Desktop 的原生 `.piplug` 扩展 | Work Panel / Sidecar | 🟡 建设中 | [分类主页](plugins/pi-desktop/README.md) |
 | **Claude Code** | *(规划中)* | 面向 Claude Code 的 MCP 工具与 Hook 增强 | 终端 CLI / Tools | 🟡 建设中 | [分类主页](plugins/claude-code/README.md) |
 | **Codex** | *(规划中)* | 面向 Codex 的本地自动化与环境桥接扩展 | CLI / Runtime | 🟡 建设中 | [分类主页](plugins/codex/README.md) |
 | **OpenCode** | *(规划中)* | 面向 OpenCode 的前端主题与工作流插件 | Webview / Extensions | 🟡 建设中 | [分类主页](plugins/opencode/README.md) |
+
+---
+
+## 🧾 整机环境清单（插件 / MCP / 技能 / 配置）
+
+本仓库不只收自制插件，还是 **Toti 本机 AI Agent 环境的可复现清单**：
+
+| 资产 | 位置 | 装法 |
+|---|---|---|
+| 第三方 pi 包（9 个，带锁定版本） | `manifest/pi-settings.json` · `docs/ENV-MANIFEST.md §2` | `pi install npm:<包>@<版本>` |
+| 自制 pi 扩展 | `plugins/pi/*`（含源码） | `pi install git:github.com/gthubtom1/agent-plugins@main` |
+| MCP server（pi 侧 10 个 + Orca 侧 4 个，带地址） | `manifest/mcp.json` · `manifest/agent-servers.json` | 复制到 `~/.pi/agent/mcp.json` / `~/.agents/servers/` |
+| 技能（3 个备份） | `manifest/skills/` | 恢复脚本拷回 `~/.agents/skills/` |
+| 配置脱敏模板（models/settings/open-tui/keybindings/trust/web-search） | `manifest/*.json` | 恢复脚本写入 `~/.pi/agent/` |
+| 扩展哈希基线 | `manifest/extensions.sha256.json` | `scripts/check-sync.ps1` 对账 |
+| 纪律卡 hubcore（私有库） | `docs/ENV-MANIFEST.md §8` | 见该节 |
+
+> 密钥（`auth.json`、provider apiKey、x64dbg Bearer）**一律不入库**：仓内只有 `${NEWAPI_API_KEY}` / `${X64DBG_MCP_TOKEN}` 占位符，
+> `.gitignore` 也硬性忽略 `auth.json` / `manifest/local/`。
+
+**换机一条命令：**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\restore-machine.ps1 -ToolRoot 'D:\HACKER' -PyRoot 'D:\EXE' -NewApiKey 'sk-…' -X64dbgToken '…'
+```
+
+完整说明（含每个插件的仓库地址、版本、落盘位置与踩坑）见 **[docs/ENV-MANIFEST.md](docs/ENV-MANIFEST.md)**。
 
 ---
 
@@ -25,12 +54,29 @@
 agent-plugins/
 ├── docs/                          # 规范与设计架构
 │   ├── ARCHITECTURE.md            # 多智能体插件统一架构设计说明
-│   └── CONTRIBUTING.md            # 新插件接入与提交流程
+│   ├── CONTRIBUTING.md            # 新插件接入与提交流程
+│   └── ENV-MANIFEST.md            # 本机整机环境清单（插件/MCP/技能/配置 + 地址 + 恢复流程）
+├── manifest/                      # 本机环境脱敏模板与哈希基线（不含密钥）
+│   ├── pi-settings.json           # settings.json 模板（packages 锁定版本）
+│   ├── mcp.json                   # 10 个 MCP server（token 占位）
+│   ├── agent-servers.json         # Orca 侧 4 个 MCP server 定义
+│   ├── models.json                # provider + 模型表（apiKey 占位）
+│   ├── open-tui.json / web-search.json / keybindings.json / trust.json
+│   ├── extensions.sha256.json     # 扩展哈希基线（对账用）
+│   └── skills/                    # 3 个技能备份 + NOTICE
+├── scripts/
+│   ├── restore-machine.ps1        # Windows 换机恢复（幂等）
+│   ├── restore-machine.sh         # Git Bash / WSL 换机恢复
+│   ├── check-sync.ps1             # 本机扩展 vs 哈希基线对账
+│   ├── split-servers.js           # agent-servers.json → 每 server 一个文件
+│   └── regen-manifest.js          # 在源机器上重新生成 manifest/
 └── plugins/                       # 各智能体专属分类目录
     ├── dsh/                       # DeepSeek Harness 插件
     │   └── dsh-infinite-retry/    # 无限重试插件（带 UI 开关）
     ├── pi/                        # Pi Coding Agent 扩展
-    │   └── pi-infinite-retry/     # 无限重试扩展（带 /retry 命令）
+    │   ├── cmd-guard/             # 命令执行守卫（清单推荐）
+    │   ├── retry-level/           # 重试档位（清单推荐）
+    │   └── pi-infinite-retry/     # 早期简版（保留参考，不进安装清单）
     ├── pi-desktop/                # PI-Desktop 插件
     ├── claude-code/               # Claude Code 扩展
     ├── codex/                     # Codex 扩展

@@ -1,0 +1,35 @@
+{
+  "lastChangelogVersion": "1.0.0",
+  "packages": [
+    "npm:pi-plan-task",
+    "npm:@demigodmode/pi-web-agent",
+    "npm:@aaronkyriesenbach/pi-package-manager",
+    "npm:pi-open-tui",
+    "npm:pi-web-access",
+    "npm:pi-mcp-adapter",
+    "npm:pi-tool-display",
+    "npm:pi-win-notify",
+    "npm:@gotgenes/pi-subagents"
+  ],
+  "retry": {
+    "enabled": true,
+    "maxRetries": 15,
+    "baseDelayMs": 2000,
+    "provider": {
+      "maxRetries": 0,
+      "maxRetryDelayMs": 30000
+    },
+    "maxAgentDelayMs": 60000
+  },
+  "extensions": [
+    "-builtin:mcp"
+  ],
+  "tuiMode": "fullscreen",
+  "hideThinkingBlock": true,
+  "modelThinkingLevels": {
+    "newapi/space-bunny-free": "max",
+    "newapi/muse-spark-1.3-contributor-free": "high"
+  },
+  "defaultProjectTrust": "always",
+  "cacheWarming": "streaming"
+}

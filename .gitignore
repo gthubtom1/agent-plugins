@@ -21,6 +21,12 @@ pnpm-debug.log*
 *.secret
 *.pem
 .credentials.yaml
+# 绝对不入库：本机密钥与真实配置（仓内只放脱敏模板 + 占位符）
+auth.json
+models.local.json
+mcp.local.json
+manifest/local/
+*.bak-20*
 
 # System & IDE files
 .DS_Store

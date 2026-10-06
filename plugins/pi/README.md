@@ -6,6 +6,18 @@
 
 ## 🚀 换机器怎么恢复（照这个做）
 
+### 方式〇：整机脚本（推荐，连配置/MCP/技能/模型表一起恢复）
+
+```powershell
+git clone https://github.com/gthubtom1/agent-plugins.git C:\Tools\agent-plugins
+powershell -ExecutionPolicy Bypass -File C:\Tools\agent-plugins\scripts\restore-machine.ps1 `
+    -ToolRoot 'D:\HACKER' -PyRoot 'D:\EXE' -NewApiKey 'sk-…' -X64dbgToken '…'
+```
+
+Git Bash / WSL：`TOOL_ROOT=... PY_ROOT=... NEWAPI_KEY=... X64DBG_TOKEN=... bash scripts/restore-machine.sh`
+
+它会装 pi 本体 + 本仓库（自制插件）+ 9 个第三方 npm 包（锁定版本），再把 `manifest/` 里的脱敏模板写回 `~/.pi/agent/`，把技能写回 `~/.agents/skills/`。完整清单见 [docs/ENV-MANIFEST.md](../../docs/ENV-MANIFEST.md)。
+
 ### 方式一：一条命令装完自制插件（推荐）
 
 ```bash
@@ -71,6 +83,21 @@ cp retry-level/retry-level.ts         ~/.pi/agent/extensions/
 | `@gotgenes/pi-subagents` | 子代理 | `pi install npm:@gotgenes/pi-subagents` |
 
 > 这些是**第三方公开发布**的包，随上游更新。本仓库只登记名字与安装命令，不放它们的源码。
+> **锁定版本**（换机要完全一致时用）：`5.0.7 / 1.14.0 / 0.5.0 / 0.3.11 / 0.35.0 / 5.0.0 / 0.5.0 / 1.0.15 / 22.0.0`，
+> 权威清单见 `manifest/pi-settings.json` 的 `packages` 与 `docs/ENV-MANIFEST.md §2`。
+
+---
+
+## 🔌 MCP / 技能 / 配置（在本仓库登记）
+
+| 类别 | 条数 | 落点 | 登记位置 |
+|---|---|---|---|
+| MCP server（pi 侧） | 10（jshook / reqable / playwright / chrome-devtools / xquik / idalib / idapro / x64dbg / x64dbg32 等） | `~/.pi/agent/mcp.json` | `manifest/mcp.json`（token 占位） |
+| MCP server（Orca 侧） | 4（context7 / everything / playwright / sequential-thinking） | `~/.agents/servers/*.json` | `manifest/agent-servers.json` |
+| 技能 | 3（computer-use / orca-cli / orchestration） | `~/.agents/skills/` | `manifest/skills/` |
+| 配置模板 | settings / models / open-tui / keybindings / trust / web-search | `~/.pi/agent/` | `manifest/*.json` |
+
+> 密钥（`auth.json`、provider apiKey、x64dbg Bearer token）不入库，只留 `${...}` 占位符。
 
 ---
 

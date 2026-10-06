@@ -1,0 +1,88 @@
+{
+  "mcpServers": {
+    "jshook": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@jshookmcp/jshook@0.3.4"
+      ],
+      "env": {
+        "JSHOOK_BASE_PROFILE": "search"
+      },
+      "timeout": 180,
+      "exposure": "deferred",
+      "description": "JS逆向 Hook 与浏览器 CDP 调试"
+    },
+    "reqable-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "reqable-mcp-server@1.0.1",
+        "--scope",
+        "minimal"
+      ],
+      "exposure": "deferred",
+      "description": "Reqable 抓包流量查询与回放"
+    },
+    "playwright-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ],
+      "exposure": "deferred",
+      "description": "Playwright 浏览器自动化 快照 点击填表"
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest"
+      ],
+      "exposure": "deferred",
+      "description": "Chrome DevTools DOM 网络性能断点"
+    },
+    "xquik": {
+      "url": "https://xquik.com/mcp",
+      "exposure": "deferred",
+      "description": "X/Twitter 公开威胁情报采集"
+    },
+    "idalib-mcp": {
+      "command": "${PY_ROOT}\\python\\Scripts\\idalib-mcp.exe",
+      "args": [
+        "--stdio"
+      ],
+      "env": {
+        "IDADIR": "${TOOL_ROOT}\\IDA Professional 9.4"
+      },
+      "timeout": 300,
+      "exposure": "deferred",
+      "description": "IDA Pro idalib 无头 MCP supervisor（默认 HTTP 8745，注册为 stdio 直连；不需要开 IDA GUI）"
+    },
+    "idapro": {
+      "url": "http://127.0.0.1:13337/mcp",
+      "exposure": "deferred",
+      "description": "IDA GUI 内 ida-pro-mcp 插件通道（IDA 打开并加载插件后监听；多实例端口递增 13337→13338→…）"
+    },
+    "x64dbg": {
+      "type": "http",
+      "url": "http://127.0.0.1:9094/",
+      "headers": {
+        "Authorization": "${X64DBG_MCP_TOKEN}"
+      },
+      "timeout": 300,
+      "exposure": "deferred",
+      "description": "x64dbg MCP 服务器（x64 位调试器，插件 x64dbg-MCP-Server.dp64 v1.5）。需先启动 x64dbg；token 在 release\\x64\\mcp_config.json，Plugins → Configure 可复制/轮换（轮换后此处要同步）"
+    },
+    "x64dbg32": {
+      "type": "http",
+      "url": "http://127.0.0.1:9095/",
+      "headers": {
+        "Authorization": "${X64DBG_MCP_TOKEN}"
+      },
+      "timeout": 300,
+      "exposure": "deferred",
+      "description": "x64dbg MCP 服务器（x32 位调试器，插件 x64dbg-MCP-Server.dp32 v1.5）。需先在 VM 逆向工作机-01 内启动 x32dbg；token 在共享目录 release\\x32\\mcp_config.json"
+    }
+  }
+}

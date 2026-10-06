@@ -1,0 +1,17 @@
+{
+  "generated_from": "~/.pi/agent/extensions",
+  "files": {
+    "cmd-guard.ts": "279896b34e455cfa447f6bd64ff8cbaafdfc8d105151a197e7b230f52e3209f0",
+    "cmd-guard.rules.json": "21f95eae296961bf6444f911395d77695dec5b928237a43a64b561e5291489a0",
+    "retry-level.ts": "e88dafbda5fe77b668e27215a99b7ee2b90d81f23f2382e86320cd5d5c445688",
+    "smoke-cmd-guard.mjs": "95d3e6f0c69d97f959946832b6268c85a8465a8bb78fb474687a8d420f863f02",
+    "orca-agent-status.ts": "3ecd762dd9f651573104408f04bd34211611eda9c340b6b73965feae64fd85bc",
+    "orca-prefill.ts": "e607af659560463bcb2b009d125b73cf493dd0fdde659798ce3cb427ca9b0494",
+    "orca-titlebar-spinner.ts": "42a41c94b16b4c3869e3a5d8746a0f43aa46e4b0b0d43b250745264389373c13"
+  },
+  "repo_sources": {
+    "cmd-guard.ts": "plugins/pi/cmd-guard/cmd-guard.ts",
+    "cmd-guard.rules.json": "plugins/pi/cmd-guard/cmd-guard.rules.json",
+    "retry-level.ts": "plugins/pi/retry-level/retry-level.ts"
+  }
+}

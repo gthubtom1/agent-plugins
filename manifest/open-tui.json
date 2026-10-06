@@ -1,0 +1,35 @@
+{
+  "enabled": true,
+  "inlineFooter": false,
+  "settingsLanguage": "zh",
+  "cursorStyle": "block",
+  "icons": {
+    "mode": "ascii"
+  },
+  "footerSegments": {
+    "cwd": true,
+    "hostname": false,
+    "sessionName": true,
+    "gitBranch": true,
+    "gitStatus": true,
+    "gitCommit": true,
+    "runtime": true,
+    "context": true,
+    "tokens": true,
+    "cost": false,
+    "extensionStatuses": true,
+    "capitalizeProviderName": true
+  },
+  "telemetry": {
+    "enabled": false,
+    "tps": false,
+    "ttft": false,
+    "duration": false,
+    "tokens": false,
+    "stalls": false,
+    "cost": false
+  },
+  "thinkingPeek": {
+    "lines": 2
+  }
+}

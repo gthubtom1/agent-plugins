@@ -1,0 +1,58 @@
+[
+  {
+    "id": "context7",
+    "label": "Context7",
+    "description": "随时查到各框架/库的最新版文档,避免模型凭旧记忆写代码",
+    "transport": "stdio",
+    "command": "npx",
+    "args": [
+      "-y",
+      "@upstash/context7-mcp"
+    ],
+    "env": {},
+    "url": null,
+    "headers": {}
+  },
+  {
+    "id": "everything",
+    "label": "Everything",
+    "description": "官方测试 server,覆盖全部 MCP 能力,用来验证接入是否正常",
+    "transport": "stdio",
+    "command": "npx",
+    "args": [
+      "-y",
+      "@modelcontextprotocol/server-everything"
+    ],
+    "env": {},
+    "url": null,
+    "headers": {}
+  },
+  {
+    "id": "playwright",
+    "label": "Playwright",
+    "description": "用可访问性树驱动浏览器:打开页面、点击、填表、截图",
+    "transport": "stdio",
+    "command": "npx",
+    "args": [
+      "-y",
+      "@playwright/mcp@latest"
+    ],
+    "env": {},
+    "url": null,
+    "headers": {}
+  },
+  {
+    "id": "sequential-thinking",
+    "label": "Sequential Thinking",
+    "description": "动态反思式分步推理,复杂问题拆解",
+    "transport": "stdio",
+    "command": "npx",
+    "args": [
+      "-y",
+      "@modelcontextprotocol/server-sequential-thinking"
+    ],
+    "env": {},
+    "url": null,
+    "headers": {}
+  }
+]
