@@ -8,16 +8,17 @@
     3. 恢复 ~/.agents/skills（仓内备份）与 ~/.agents/servers
     4. 打印 pi list 与扩展哈希对账结果
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File scripts\restore-machine.ps1 -ToolRoot 'D:\HACKER' -PyRoot 'D:\EXE' -NewApiKey 'sk-…' -X64dbgToken '…'
+  powershell -ExecutionPolicy Bypass -File scripts\restore-machine.ps1 -ToolRoot 'D:\Tools' -PyRoot 'D:\Tools\py' -NewApiKey 'sk-…' -X64dbgToken '…'
+  # 不传 -ToolRoot / -PyRoot 时按 REVERSE_TOOL_ROOT / REVERSE_PY_ROOT 环境变量取，都没有才用上面的默认值
 #>
 [CmdletBinding()]
 param(
   # pi 主目录（默认 $env:USERPROFILE\.pi\agent）
   [string]$PiHome = (Join-Path $env:USERPROFILE '.pi\agent'),
-  # 逆向工具根，本机 D:\HACKER（IDA / x64dbg / jadx / DIE…）
-  [string]$ToolRoot = 'D:\HACKER',
-  # Python 根，本机 D:\EXE（idalib-mcp.exe 在 Scripts 下）
-  [string]$PyRoot = 'D:\EXE',
+  # 逆向工具根（IDA / x64dbg / jadx / DIE…）。换盘设 REVERSE_TOOL_ROOT，别改脚本。
+  [string]$ToolRoot = $(if ($env:REVERSE_TOOL_ROOT) { $env:REVERSE_TOOL_ROOT } else { 'D:\Tools' }),
+  # Python 根（idalib-mcp.exe 在 Scripts 下）
+  [string]$PyRoot = $(if ($env:REVERSE_PY_ROOT) { $env:REVERSE_PY_ROOT } else { 'D:\Tools\py' }),
   # newapi provider 的 API key（写回 models.json + auth.json）
   [string]$NewApiKey = '',
   # x64dbg / x64dbg32 的 MCP Bearer token（来自 release\x64\mcp_config.json）

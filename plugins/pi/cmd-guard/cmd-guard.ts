@@ -1,153 +1,252 @@
 /**
- * cmd-guard —— 命令执行物理守卫（pi 扩展）
+ * cmd-guard —— 命令执行物理兜底（pi 扩展）
  *
- * 病根：pi 的 bash 工具 `timeout` 是 optional，**不传就无限等**（bash.js:30
- * `Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" }))`）。
- * 模型在工具阻塞期间不在运行、没有任何代码在跑，所以它永远不可能自己发现
- * 命令卡住 —— 「终端计时器涨 + token 计数静止」= 卡在命令，不是卡在推理。
+ * 它解决的是「提示词管不住」的那部分：
+ *   · 模型可能忘了传 timeout（pi 的 bash/powershell 工具里 timeout 是可选的，不传 = 无限等）
+ *   · 模型可能直接拉起 GUI 程序
  *
- * 本扩展挂在 `tool_call` 上，改写模型发出的参数（原地改 event.input）或直接拦下，
- * 因此模型即使写错也**物理上跑不超时**。
+ * 这两件事模型自己是察觉不到的 —— 命令阻塞期间模型不在运行，没有任何代码在跑。
+ * 「终端计时器在涨 + token 计数静止」= 卡在命令，不是卡在推理。这类卡死不会自愈。
+ * 所以必须有一层**物理拦截**，不能只靠文档说「不许这么干」。
  *
- * 三件事：
- *   1. 补默认 timeout（按命令分类：探查 / 分析 / 构建·虚拟机）
- *   2. 拦 GUI/交互式二进制（规则从 tool-index 派生 + 内置兜底，不硬编码单一工具）
- *   3. 让卡住这件事在 CLI 里看得见：底栏实时状态 + /stall 报告
+ * ── 它做什么 ────────────────────────────────────────────────
+ *   1. 补 timeout      没带 timeout 的调用按命令类型自动补（探查 / 分析 / 构建三档）
+ *   2. 拦 GUI 二进制   弹窗等输入、零 stdout、进程永不退 —— 同步等它 = 整轮卡死
+ *   3. 有界化易挂命令   ssh/scp 补 ConnectTimeout；超大递归扫描抬 timeout
+ *   4. 把坑回灌给模型   长链命令、`start` 不带 /b、vmrun 快照锁等，在结果里回一句
+ *   5. 卡死可见         底栏实时状态（已跑多久 / 静默多久）+ `/stall` 报告
  *
- * 规则来源优先级：同目录 cmd-guard.rules.json > skills/tool-index.md（若已产出
- * 运行模式列）> 内置表。索引是 skills 包自动生成的生成物，所以索引里的标注会
- * 自动生效，本文件不需要跟着每加一个工具就改。
+ * ── 它不做什么 ───────────────────────────────────────────────
+ *   · 不解决「上游把 tool_use 结构化块当纯文本返回」那类 API 格式问题。
+ *   · 不是路由、不是技能、不是工具清单 —— 它只是一层兜底。
+ *     工具在哪、怎么装、怎么登记，全在技能包的 TOOL-CHAIN.md 里。
+ *
+ * ── ★ GUI 清单从哪来（这是本文件最关键的设计）─────────────────
+ *   优先级：rules.json 手工项 > TOOL-CHAIN.md 派生 > 内置兜底表
+ *
+ *   TOOL-CHAIN.md 是唯一事实源。它写成什么，这里就拦什么 ——
+ *   你在文档里加一行 `` `foo.exe`→`foo-cli` ``，本插件下次调用就认得，不用改代码。
+ *   反过来：文档里删了，拦截自动消失。
+ *
+ *   ⚠️ 绝不依赖任何 `tool-index.md` 之类的生成物：那些是旧框架的产物，
+ *      路径在换机后根本不存在，读不到会导致 GUI 拦截**整个静默失效**（最坏情况）。
+ *      找不到文档时只退到内置兜底表，并在启动横幅里明说「★未找到 TOOL-CHAIN.md」。
+ *
+ * ── 关闭 ────────────────────────────────────────────────────
+ *   设环境变量 CMD_GUARD=0 后重启 pi
+ *   或 `/guard off`（本次会话内关），`/guard on` 开回来
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-/* ────────────────────────────── 类型 ────────────────────────────── */
+/* ────────────────────────────── 配置 ────────────────────────────── */
 
-type TextContent = { type: "text"; text: string };
-
-type GuardConfig = {
+interface GuardConfig {
+	/** 模型自带 timeout 时的默认值（普通命令档） */
 	defaultTimeout: number;
+	/** 探查类（只读快命令） */
 	probeTimeout: number;
+	/** 分析类（默认档，缺省等于 defaultTimeout） */
+	analysisTimeout: number;
+	/** 构建类 / 解释器 */
 	heavyTimeout: number;
+	/** 递归大目录扫描的最低 timeout */
+	scanTimeout: number;
+	/** 超过它算「疑似卡死」，底栏变红 */
 	stallSeconds: number;
+	/** 超过它没有新输出，底栏变黄（还在跑，可能只是慢） */
 	noOutputStallSeconds: number;
+	/** false = 只记账不阻断（出问题时先观察，不打断） */
 	enforce: boolean;
-	guiBinaries: string[];
+	/** false = 不拦 GUI，只注入 timeout 兜底。客户机 / VM 上 GUI 是正当手段，用这个 */
+	blockGui: boolean;
+	/** 给 ssh/scp 补 ConnectTimeout */
+	hardenSsh: boolean;
+	/** 手写 GUI 名单（覆盖同名派生项）。值可以是提示语，null / "" 表示「明确不拦」 */
+	guiBinaries: Record<string, string | null>;
+	/** 命令里含其中任一子串则整条跳过守卫（救急用，慎用） */
 	allow: string[];
-	indexPaths: string[];
-};
-
-type CallRecord = {
-	toolCallId: string;
-	toolName: string;
-	command: string;
-	shell: "bash" | "powershell";
-	startedAt: number;
-	lastOutputAt: number;
-	injected: string[];
-	notes: string[];
-	ownTimeout: number | null;
-};
-
-type HistoryEntry = {
-	at: string;
-	toolName: string;
-	head: string;
-	seconds: number;
-	verdict: string;
-};
+	/** 额外的 GUI 名单来源文档（Markdown）。文档里 `` `a.exe`→`b` `` 会被派生 */
+	toolChainPaths: string[];
+	/** ★ 技能包根（含 TOOL-CHAIN.md 的那一层）。留空 = 自动探测 */
+	skillRoot: string | null;
+}
 
 const HERE = __dirname;
+
 const DEFAULTS: GuardConfig = {
 	defaultTimeout: 120,
 	probeTimeout: 30,
+	analysisTimeout: 120,
 	heavyTimeout: 600,
+	scanTimeout: 180,
 	stallSeconds: 240,
 	noOutputStallSeconds: 90,
 	enforce: true,
-	guiBinaries: [],
-	allow: [],
-	indexPaths: [
-		"D:\\Project\\skills-hub\\integrated-skill-hub\\skills\\tool-index.md",
-		"D:\\Project\\skills-hub\\integrated-skill-hub\\skills\\tool-index.json",
-	],
+	blockGui: true,
+	hardenSsh: true,
+	guiBinaries: {},
+	allow: ["cmd-guard-skip"],
+	toolChainPaths: [],
+	skillRoot: null,
 };
 
-/** 内置兜底表：索引里没标注时，至少拦住这些「会弹窗 / 会等人」的二进制。 */
-const BUILTIN_GUI: { name: string; use: string }[] = [
-	{ name: "die.exe", use: "D:\\HACKER\\DIE\\diec.exe（CLI 版，`diec.exe -d -j <file>`）" },
-	{ name: "msiexec.exe", use: "加 /quiet /norestart，或改用 winget/choco" },
-	{ name: "notepad.exe", use: "改用 edit/write 工具直接落盘" },
-	{ name: "explorer.exe", use: "改用 ls/read/find 工具" },
-	{ name: "taskmgr.exe", use: "改用 tasklist / taskkill 命令行" },
-	{ name: "regedit.exe", use: "改用 reg add / reg query 命令行" },
-	{ name: "control.exe", use: "改用 services.msc 无关的命令行工具" },
-	{ name: "mmc.exe", use: "改用命令行等价工具" },
-	{ name: "wireshark.exe", use: "tshark.exe（CLI 版，支持 -r/-i/-w）" },
-	{ name: "procmon.exe", use: "procmon64.exe /B 批处理模式或 Sysmon CLI" },
-	{ name: "ida.exe", use: "idalib-mcp（MCP）或 Ghidra analyzeHeadless（无头）" },
-	{ name: "ida64.exe", use: "idalib-mcp（MCP）或 Ghidra analyzeHeadless（无头）" },
-	{ name: "x64dbg.exe", use: "x32dbg/x64dbg 需 GUI 动态调试 —— 起在目标环境自己的交互式桌面会话里，不要经 bash 拉起" },
-	{ name: "x32dbg.exe", use: "同上：动态调试需要交互式桌面会话，不要在 bash 里拉起" },
-	{ name: "binaryninja.exe", use: "Binary Ninja 的 Python API / headless" },
-];
+/**
+ * 内置兜底表：TOOL-CHAIN.md 读不到时，至少拦住这些「会弹窗 / 会等人」的二进制。
+ * **这是下限不是上限** —— 文档里有的都会额外加进来。
+ * 值 = 给模型的替代提示；null = 明确不拦（本身就是 headless）。
+ */
+const BUILTIN_GUI: Record<string, string | null> = {
+	"die.exe": "改用 CLI 版 diec（先 --version 确认参数）",
+	"wireshark.exe": "改用 tshark",
+	"x64dbg.exe": "改用控制台 headless 版（stdin 喂命令、输出可读）",
+	"x32dbg.exe": "改用控制台 headless 版",
+	"ida.exe": "改用 idat（headless）或 Ghidra analyzeHeadless",
+	"ida64.exe": "改用 idat（headless）或 Ghidra analyzeHeadless",
+	"windbg.exe": "改用 cdb.exe（支持 crash dump 分析）",
+	"dnspy.exe": "改用 dnSpy.Console",
+	"ollydbg.exe": "改用控制台版调试器",
+	"immunitydebugger.exe": "改用控制台版调试器",
+	"cheatengine.exe": "内存扫描走脚本，不要同步等 GUI",
+	"cheatengine-x86_64.exe": "内存扫描走脚本，不要同步等 GUI",
+	"ilspy.exe": "改用 ilspycmd",
+	"procmon.exe": "改用 procmon64.exe /B 批处理模式，或 Sysmon CLI",
+	"binaryninja.exe": "改用 Binary Ninja 的 Python API / headless",
+	"jeb.exe": "改用 jeb-cli / headless 模式",
+	// 这两个本身就是 headless —— 明确标「不拦」
+	"idat.exe": null,
+	"idat64.exe": null,
+	"analyzeheadless.bat": null,
+};
 
-/* ────────────────────────── 规则加载（含缓存） ────────────────────────── */
+/** 解释器 / 包管理器：跑的是任意脚本，不能用分类 timeout 硬套 */
+const INTERPRETERS = new Set([
+	"python", "python3", "py", "pip", "pip3", "uv", "pipx",
+	"node", "npm", "npx", "pnpm", "yarn", "bun",
+	"bash", "sh", "pwsh", "powershell", "cmd", "wsl",
+	"java", "javac", "dotnet", "go", "cargo", "rustc",
+	"make", "cmake", "msbuild", "gradle", "mvn",
+	"r2", "radare2", "ghidra", "analyzeheadless",
+]);
 
-let config: GuardConfig = { ...DEFAULTS };
-/** 解释器/包管理器：它们跑的是任意脚本，索引里的短探查值不能当硬上限，故不采纳索引 timeout。 */
-const INTERPRETERS = new Set(["python", "python3", "py", "pip", "pip3", "node", "npx", "npm", "java", "dotnet", "bash", "sh", "cmd", "powershell"]);
+/* ──────────────────── 技能包根定位（换机零配置）──────────────────── */
 
-/** 从 tool-index.md 读「默认 timeout」列。返回 Map<可执行名或stem, 秒>。 */
-function deriveTimeoutsFromIndexMd(file: string): Map<string, number> {
-	const out = new Map<string, number>();
-	let text = "";
+function fileExists(p: string): boolean {
 	try {
-		text = fs.readFileSync(file, "utf-8");
+		return fs.existsSync(p);
 	} catch {
-		return out;
+		return false;
 	}
-	const lines = text.split(/\r?\n/);
-	let tCol = -1;
-	let nameCol = -1;
-	let pathCol = -1;
-	for (const line of lines) {
-		if (!line.trim().startsWith("|")) continue;
-		const cells = line.split("|").map((c) => c.trim()).filter((c) => c.length > 0);
-		if (cells[0] !== "工具") continue;
-		nameCol = cells.indexOf("工具");
-		tCol = cells.indexOf("默认 timeout");
-		// 路径列表头改名过（路径 → 路径(相对根)），两种都认
-		pathCol = cells.indexOf("路径(相对根)");
-		if (pathCol < 0) pathCol = cells.indexOf("路径");
-		break;
+}
+
+function looksLikeRoot(dir: string): boolean {
+	return fileExists(path.join(dir, "TOOL-CHAIN.md"));
+}
+
+/**
+ * 按顺序找含 TOOL-CHAIN.md 的目录。第一个命中即返回。
+ * 顺序刻意设计成「越确定越靠前」，这样在任何机器上都不需要先设环境变量。
+ */
+function findSkillRoot(configured: string | null): string | null {
+	const candidates: string[] = [];
+	if (configured) candidates.push(configured);
+
+	// 1) 显式环境变量
+	for (const k of ["RELAB_SKILL_ROOT", "REVERSE_SKILL_ROOT", "CMD_GUARD_SKILL_ROOT"]) {
+		const v = process.env[k];
+		if (v) candidates.push(v);
 	}
-	if (tCol < 0) return out;
-	for (const line of lines) {
-		if (!line.trim().startsWith("|")) continue;
-		const cells = line.split("|").map((c) => c.trim()).filter((c) => c.length > 0);
-		if (cells.length <= tCol || cells[nameCol] === "工具") continue;
-		const name = cells[nameCol] ?? "";
-		const secs = parseInt(cells[tCol], 10);
-		if (!name || name === "—" || !Number.isFinite(secs) || secs <= 0) continue;
-		out.set(name.toLowerCase(), secs);
-		const pathCell = (pathCol >= 0 ? cells[pathCol] : "") ?? "";
-		for (const exe of pathCell.match(/[\w.\-]+\.(exe|bat|cmd)/gi) || []) {
-			out.set(exe.toLowerCase(), secs);
-			out.set(exe.replace(/\.(exe|bat|cmd)$/i, "").toLowerCase(), secs);
+
+	// 2) 本文件就躺在技能包里 → 从 __dirname 往上数（kernel/extensions/pi/ → 根）
+	//    这是最可靠的一条：只要整包 clone 下来就成立，不依赖任何环境变量。
+	let dir = HERE;
+	for (let i = 0; i < 5; i++) {
+		candidates.push(dir);
+		const up = path.dirname(dir);
+		if (up === dir) break;
+		dir = up;
+	}
+
+	// 3) 习惯位置（换盘用环境变量覆盖即可）
+	candidates.push("C:/relab2", "C:/relab", "D:/relab2");
+
+	// 4) 旧世界路径，只为兼容老 rules.json
+	candidates.push("D:/Project/skills-hub/integrated-skill-hub");
+
+	const seen = new Set<string>();
+	for (const c of candidates) {
+		const abs = path.resolve(c);
+		const key = abs.toLowerCase();
+		if (seen.has(key)) continue;
+		seen.add(key);
+		if (looksLikeRoot(abs)) return abs;
+	}
+	return null;
+}
+
+/** 技能包根 + 文档清单。root 为 null 表示一处都没找到 —— 启动时会明说。 */
+function docSources(config: GuardConfig, root: string | null): string[] {
+	const out: string[] = [];
+	if (root) {
+		const main = path.join(root, "TOOL-CHAIN.md");
+		if (fileExists(main)) out.push(main);
+		// 技能包里其它也会写 GUI 替代方案的地方，一并认（存在才认）
+		for (const rel of ["skillpack/skills/TOOLS.md", "skillpack/skills/SKILL.md"]) {
+			const p = path.join(root, rel);
+			if (fileExists(p)) out.push(p);
 		}
+	}
+	for (const p of config.toolChainPaths) {
+		const abs = path.resolve(p);
+		if (fileExists(abs)) out.push(abs);
 	}
 	return out;
 }
 
-let guiTable: Map<string, string> = new Map();
-let indexTimeouts: Map<string, number> = new Map();
-let rulesSource = "内置基线";
+/* ──────────────────── 从文档派生 GUI 名单 ──────────────────── */
+
+/**
+ * 认两种写法，都是文档里自然会出现的人话：
+ *   行内：  `die.exe`→`diec`   `Wireshark.exe`→`tshark`   `ida.exe` 改用 idat
+ *   表格：  | `foo.exe` | **`foo-cli`** `-x <file>` |
+ *
+ * 不做精确解析 —— 宁可多拦几个（模型看到提示会自己判断），不可漏拦。
+ */
+const ARROW_RE = /`?([\w.\-]+\.(?:exe|bat|cmd))`?\s*(?:→|->|=>|改用|换成)\s*`?([\w.\-]+(?:\.exe|\.bat|\.cmd)?)`?/gi;
+const TABLE_RE = /^\s*\|\s*`?([\w.\-]+\.(?:exe|bat|cmd))`?\s*\|[^|]*?`([\w.\-]+(?:\.exe|\.bat|\.cmd)?)`/gim;
+
+function parseGuiFromDoc(text: string, source: string): Map<string, string> {
+	const out = new Map<string, string>();
+
+	ARROW_RE.lastIndex = 0;
+	let m: RegExpExecArray | null;
+	while ((m = ARROW_RE.exec(text)) !== null) {
+		const gui = m[1].toLowerCase();
+		const cli = m[2].toLowerCase();
+		if (gui === cli) continue; // 自己指向自己 = 本身就是 CLI
+		out.set(gui, `改用 ${cli}（来源 ${source}）`);
+	}
+
+	TABLE_RE.lastIndex = 0;
+	while ((m = TABLE_RE.exec(text)) !== null) {
+		const gui = m[1].toLowerCase();
+		const cli = m[2].toLowerCase();
+		if (gui === cli) continue;
+		if (!out.has(gui)) out.set(gui, `改用 ${cli}（来源 ${source}）`);
+	}
+
+	return out;
+}
+
+/* ──────────────────────── 规则加载（含热重载）──────────────────── */
+
+let config: GuardConfig = { ...DEFAULTS };
+/** exe 名（小写）→ 替代提示；值 null = 明确不拦 */
+let guiTable = new Map<string, string | null>();
+let rulesSource = "内置兜底表";
 let loadedAt = 0;
 let loadedStamp = "";
-let rulesMtime = 0;
 
 function rulesPath(): string {
 	return path.join(HERE, "cmd-guard.rules.json");
@@ -161,176 +260,120 @@ function mtimeOf(p: string): string {
 	}
 }
 
-/**
- * 从 tool-index.md 派生 GUI 规则。两种表头都支持：
- *  A. 新格式（有独立的「运行模式」列，值 CLI / GUI / MCP / CLI+MCP）
- *  B. 旧格式（无该列，靠「CLI=是/否」「GUI 版」这类 token 识别）
- * 解析不到任何 GUI 行时返回空表，调用方回落到内置基线。
- */
-function deriveFromIndexMd(file: string): Map<string, string> {
-	const out = new Map<string, string>();
-	let text = "";
+function loadConfig(force = false): void {
+	const now = Date.now();
+	const rp = rulesPath();
+	const stamp = `${mtimeOf(rp)}:${process.env.RELAB_SKILL_ROOT || ""}`;
+	// 30 秒节流：文件没变就别反复读盘；但 /guard reload 走 force
+	if (!force && stamp === loadedStamp && now - loadedAt < 30_000) return;
+	loadedStamp = stamp;
+	loadedAt = now;
+
+	config = { ...DEFAULTS, guiBinaries: {}, allow: [...DEFAULTS.allow], toolChainPaths: [] };
+	let parseError = "";
 	try {
-		text = fs.readFileSync(file, "utf-8");
-	} catch {
-		return out;
-	}
-
-	const lines = text.split(/\r?\n/);
-	// 定位表头行，读出列顺序
-	let modeCol = -1;
-	let pathCol = -1;
-	let nameCol = -1;
-	let verifyCol = -1;
-	for (const line of lines) {
-		if (!line.trim().startsWith("|")) continue;
-		const cells = line
-			.split("|")
-			.map((c) => c.trim())
-			.filter((c) => c.length > 0);
-		if (cells[0] !== "工具") continue;
-		modeCol = cells.indexOf("运行模式");
-		nameCol = cells.indexOf("工具");
-		// 路径列表头改名过（路径 → 路径(相对根)），两种都认
-		pathCol = cells.indexOf("路径(相对根)");
-		if (pathCol < 0) pathCol = cells.indexOf("路径");
-		verifyCol = cells.indexOf("验证命令");
-		break;
-	}
-	const structured = modeCol > 0;
-
-	if (!structured && !/CLI\s*[:：=]|GUI\s*版|禁止经\s*bash|禁止.{0,4}bash/i.test(text)) return out;
-
-	// CLI 孪生表：basename(去 .exe/.bat/.cmd) -> 该 CLI 行的可执行名，用于给 GUI 行算「改用 X」
-	const cliTwin = new Map<string, string>();
-
-	const parse = (line: string): string[] | null => {
-		if (!line.trim().startsWith("|")) return null;
-		const cells = line
-			.split("|")
-			.map((c) => c.trim())
-			.filter((c) => c.length > 0);
-		if (cells.length < 3) return null;
-		if (/^-+$/.test(cells[0])) return null;
-		return cells;
-	};
-
-	if (structured) {
-		for (const line of lines) {
-			const cells = parse(line);
-			if (!cells || cells[nameCol] === "工具") continue;
-			if (cells.length <= modeCol) continue;
-			const mode = cells[modeCol] ?? "";
-			const name = cells[nameCol] ?? "";
-			const pathCell = (pathCol >= 0 ? cells[pathCol] : "") ?? "";
-			const verifyCell = (verifyCol >= 0 ? cells[verifyCol] : "") ?? "";
-			if (!name || name === "—") continue;
-			// 能力状态视图等其它表：没有运行模式列的行直接跳过
-			if (!/^(CLI|GUI|MCP|CLI\+MCP)$/.test(mode)) continue;
-			const isGui = mode === "GUI";
-			const exes = pathCell.match(/[\w.\-]+\.(exe|bat|cmd|ps1|jar)/gi) || [];
-			if (!isGui) {
-				// CLI 孪生：记录 xxx(去扩展名) -> 可执行名，供同名 GUI 行反查
-				for (const exe of exes) cliTwin.set(exe.replace(/\.(exe|bat|cmd)$/i, "").toLowerCase(), exe);
-				continue;
+		if (fileExists(rp)) {
+			const raw = JSON.parse(fs.readFileSync(rp, "utf-8")) as Record<string, unknown>;
+			for (const k of Object.keys(DEFAULTS) as (keyof GuardConfig)[]) {
+				if (raw[k] !== undefined) (config as Record<string, unknown>)[k] = raw[k];
 			}
-			let hint = "";
-			if (verifyCell && verifyCell !== "—") hint = verifyCell;
-			if (!exes.length) {
-				// PE-bear / jeb-pro 等无 .exe 出现在路径的：仍按名字登记
-				out.set(name.toLowerCase(), hint || "tool-index.md 标为 GUI，无 CLI 孪生行");
-				continue;
-			}
-			for (const exe of exes) {
-				const base = exe.toLowerCase();
-				const stem = base.replace(/\.(exe|bat|cmd)$/, "");
-				// CLI 孪生：先按同名 stem 查，再查经典的 x -> xc（die -> diec, jadx -> jadx）
-				let twin = cliTwin.get(stem);
-				if (!twin || twin.toLowerCase() === base) twin = cliTwin.get(stem + "c");
-				let alt: string;
-				if (twin && twin.toLowerCase() !== base) {
-					alt = `${twin}（CLI 孪生）`;
-				} else if (verifyCell && verifyCell !== "—" && !/GUI|无\s*CLI|禁/.test(verifyCell)) {
-					alt = `${verifyCell.split(" ")[0]}（CLI 孪生；验证：${verifyCell}）`;
-				} else if (verifyCell && verifyCell !== "—") {
-					alt = `无 CLI 孪生；${verifyCell}`;
-				} else {
-					alt = "见 tool-index.md 同名 CLI 孪生行";
-				}
-				out.set(base, alt);
+			// 兼容老 rules.json：indexPaths 也当成文档来源
+			const legacy = raw.indexPaths;
+			if (Array.isArray(legacy)) {
+				config.toolChainPaths = [...config.toolChainPaths, ...(legacy as string[])];
 			}
 		}
-		return out;
+	} catch (e) {
+		// 规则坏了要用默认值，但不能因此让守卫变成故障源 —— 也不能静默
+		parseError = (e as Error).message;
+		console.error(`[cmd-guard] rules.json 解析失败，改用默认配置：${parseError}`);
+	}
+	if (!Array.isArray(config.allow)) config.allow = [];
+	if (!Array.isArray(config.toolChainPaths)) config.toolChainPaths = [];
+	// 手工项必须是「exe 名 → 提示语/null」的对象。旧版这里收的是数组，两种形状都见过，
+	// 先按形状判断：写错时退成空表并在 stderr 说明，而不是让 Object.entries 拿数组当表用。
+	if (!config.guiBinaries || typeof config.guiBinaries !== "object" || Array.isArray(config.guiBinaries)) {
+		if (config.guiBinaries !== undefined && config.guiBinaries !== null) {
+			console.error("[cmd-guard] guiBinaries 形状不对（要 \"exe名\": \"提示语\" 对象），本项已忽略");
+		}
+		config.guiBinaries = {};
 	}
 
-	// 旧格式兼容分支：保留原有 token 识别
-	for (const line of lines) {
-		const cells = parse(line);
-		if (!cells) continue;
-		const joined = cells.join(" ");
-		const isGui = /GUI\s*版|禁止经\s*bash|CLI\s*[:：=]\s*(否|no|false)|禁止.{0,6}(弹窗|执行)/i.test(joined);
-		const isCli = /CLI\s*[:：=]\s*(是|yes|true)|CLI\s*版/i.test(joined);
-		if (!isGui && !isCli) continue;
-		const exes = joined.match(/[\w.\-]+\.(exe|bat|cmd|ps1|py|jar)/gi) || [];
-		const cliHint = joined.match(/改用\s*([^\s，。；|]+)/);
-		const hint = cliHint ? cliHint[1] : "";
-		for (const exe of exes) {
-			const base = exe.toLowerCase();
-			if (isGui || !exes.some((o) => o.toLowerCase().replace(/c\.(exe|bat)$/, ".$1") === base.replace(/c\.(exe|bat)$/, ".$1"))) {
-				out.set(base, hint || "见 tool-index.md 同行的 CLI 条目");
+	const root = findSkillRoot(config.skillRoot);
+	const docs = docSources(config, root);
+
+	// 优先级（后者覆盖前者）：内置基线 → 文档派生 → rules.json 手工项
+	guiTable = new Map(Object.entries(BUILTIN_GUI));
+	rulesSource = docs.length ? `文档派生（${docs.length} 份）` : "内置兜底表";
+	if (!docs.length) rulesSource += " ★未找到 TOOL-CHAIN.md";
+	if (parseError) rulesSource += " ★rules.json 有错";
+
+	for (const d of docs) {
+		try {
+			for (const [k, v] of parseGuiFromDoc(fs.readFileSync(d, "utf-8"), path.basename(d))) {
+				guiTable.set(k, v);
 			}
+		} catch (e) {
+			console.error(`[cmd-guard] 读文档失败 ${d}：${(e as Error).message}`);
 		}
+	}
+
+	for (const [k, v] of Object.entries(config.guiBinaries || {})) {
+		guiTable.set(k.toLowerCase(), v === null || v === "" ? null : String(v));
+	}
+}
+
+/* ─────────────────────── 命令识别与分类 ─────────────────────── */
+
+const SEG_SPLIT = /&&|\|\||[;\n|]/;
+
+/**
+ * 抽出命令里**真正被调用**的可执行文件名。
+ * 只看「命令位置」—— 字符串开头，或分段（`&&` `||` `;` `|` 换行）之后的第一个词元。
+ * 这样 `Test-Path D:\Tools\die\die.exe` 这种「探测文件在不在」不会被误拦。
+ */
+function invokedNames(cmd: string): string[] {
+	const out: string[] = [];
+	for (const rawSeg of cmd.split(SEG_SPLIT)) {
+		let seg = rawSeg.replace(/^\s*[({\[]+/, "");
+		// 剥掉前置包装，最多剥 5 层（env A=1 nohup sudo start /b X ...）
+		for (let i = 0; i < 5; i++) {
+			const before = seg;
+			seg = seg.replace(
+				/^\s*(?:&\s*|call\s+|nohup\s+|sudo\s+|doas\s+|time\s+|start(?:\s+\/[bB])?\s+|Start-Process\s+(?:-FilePath\s+)?|Invoke-Item\s+|ii\s+)/i,
+				"",
+			);
+			seg = seg.replace(/^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, "");
+			if (seg === before) break;
+		}
+		seg = seg.trim();
+		if (!seg) continue;
+		const m = seg.match(/^["']?([^"'&\s|;]+)["']?/);
+		if (!m) continue;
+		const base = (m[1].split(/[\\/]/).pop() || "").toLowerCase();
+		if (base) out.push(base);
 	}
 	return out;
 }
 
-function loadConfig(force = false): void {
-	const now = Date.now();
-	const stamp = mtimeOf(rulesPath());
-	if (!force && stamp === loadedStamp && now - loadedAt < 30_000) return;
-
-	loadedStamp = stamp;
-	loadedAt = now;
-	rulesMtime = Number(stamp) || 0;
-
-	config = { ...DEFAULTS };
-	try {
-		const p = rulesPath();
-		if (fs.existsSync(p)) {
-			const raw = JSON.parse(fs.readFileSync(p, "utf-8")) as Partial<GuardConfig>;
-			config = { ...config, ...raw };
-			config.indexPaths = raw.indexPaths?.length ? raw.indexPaths : DEFAULTS.indexPaths;
-		}
-	} catch {
-		/* 规则文件坏了就用默认值，不让守卫自己变成故障源 */
+/** 词元在 GUI 表里命中吗？返回 [表内键, 提示] 或 null（提示为 null 表示明确不拦） */
+function guiHit(token: string): [string, string | null] | null {
+	const keys = token.includes(".") ? [token] : [token, `${token}.exe`, `${token}.bat`, `${token}.cmd`];
+	for (const k of keys) {
+		if (guiTable.has(k)) return [k, guiTable.get(k) ?? null];
 	}
-
-	// 优先级（后者覆盖前者）：内置基线 → 索引派生 → rules.json 手工条目。
-	// 手工条目最后写入，因此可以覆盖索引派生的同键条目。
-	guiTable = new Map();
-	for (const g of BUILTIN_GUI) guiTable.set(g.name.toLowerCase(), g.use);
-	rulesSource = "内置基线";
-	let derivedCount = 0;
-	for (const idx of config.indexPaths) {
-		if (idx.endsWith(".json")) continue;
-		for (const [k, v] of deriveFromIndexMd(idx)) {
-			guiTable.set(k, v);
-			derivedCount++;
-		}
-	}
-	if (derivedCount > 0) rulesSource = `索引派生(${derivedCount}条)`;
-	indexTimeouts = new Map();
-	for (const idx of config.indexPaths) {
-		if (idx.endsWith(".json")) continue;
-		for (const [k, v] of deriveTimeoutsFromIndexMd(idx)) indexTimeouts.set(k, v);
-	}
-
-	// 手工条目最后覆盖
-	for (const extra of config.guiBinaries || []) guiTable.set(extra.toLowerCase(), "cmd-guard.rules.json 手工覆盖");
-	if ((config.guiBinaries || []).length > 0) rulesSource += `+手工(${config.guiBinaries.length})`;
+	return null;
 }
 
-/* ────────────────────────── 命令分类与改写 ────────────────────────── */
+function findGui(cmd: string): [string, string] | null {
+	for (const name of invokedNames(cmd)) {
+		const hit = guiHit(name);
+		if (!hit) continue;
+		if (hit[1] === null) continue; // 明确标记为 headless，不拦
+		return [hit[0], hit[1]];
+	}
+	return null;
+}
 
 const HEAVY = [
 	/\bvmrun\b/i,
@@ -347,22 +390,18 @@ const HEAVY = [
 const PROBE = [
 	/^\s*(ls|dir|Get-ChildItem|gci)\b/i,
 	/^\s*(cat|type|head|tail|less|more)\b/i,
-	/^\s*(which|where|Get-Command|Test-Path)\b/i,
+	/^\s*(which|where|Get-Command|Test-Path|Resolve-Path|Get-Item|Get-Content)\b/i,
 	/^\s*(echo|cd|pwd|whoami|date|ver|uname)\b/i,
-	/^\s*(git\s+(status|log|diff|show))\b/i,
+	/^\s*(git\s+(status|log|diff|show|branch|rev-parse))\b/i,
 ];
-const RECURSIVE_SCAN = /\b(find|rg|grep|Get-ChildItem|gci)\b[^\n]*(\s-r\b|-Recurse|[A-Za-z]:[\\/]?(HACKER|Project|Users|Windows|node_modules|EXE|\.git)\b|[A-Za-z]:[\\/]\s|\/(usr|var|opt|home)\b)/i;
-const DRIVE_ROOT_SCAN = /\b(find|rg|grep|dir|Get-ChildItem)\b[^\n]*\s([A-Za-z]:[\\/]\s*["']?$|["']?[A-Z]:[\\/](?![^\s]*[\\/]\w))|"[A-Za-z]:[\\/]"/i;
-
-/** 命令调用的若是索引里的工具，返回该工具的索引 timeout；解释器类返回 0。 */
-function indexTimeoutFor(cmd: string): { secs: number; tool: string } {
-	for (const exe of invokedBinaries(cmd)) {
-		if (INTERPRETERS.has(exe.replace(/\.(exe|bat|cmd)$/i, ""))) continue;
-		const secs = indexTimeouts.get(exe) ?? indexTimeouts.get(exe.replace(/\.(exe|bat|cmd)$/i, ""));
-		if (secs) return { secs, tool: exe };
-	}
-	return { secs: 0, tool: "" };
-}
+const RECURSIVE_SCAN =
+	/\b(find|rg|grep|Get-ChildItem|gci)\b[^\n]*(\s-r\b|-Recurse|[A-Za-z]:[\\/](HACKER|Project|Users|Windows|node_modules|EXE|Tools|\.git)\b|\/(usr|var|opt|home)\b)/i;
+const DRIVE_ROOT_SCAN =
+	// 只认「命令词 + 路径正好停在盘符根」。旧版两处写法都有问题：
+	//   顶层 `|` 让第二个分支脱离命令词 → 任何带 C:\ 的命令都被当成全盘扫描；
+	//   负向前瞻只查「后面还有没有反斜杠」→ `C:\relab2` 没有反斜杠，也被误判成全盘扫描。
+	// 现在两条分支都要求路径 token 到此为止。
+	/\b(find|rg|grep|dir|Get-ChildItem|gci)\b[^\n]*?(?:"[A-Za-z]:[\\/]"|[A-Za-z]:[\\/](?=[\s"']*$))/i;
 
 function classify(cmd: string): "probe" | "heavy" | "normal" {
 	if (HEAVY.some((r) => r.test(cmd))) return "heavy";
@@ -370,11 +409,20 @@ function classify(cmd: string): "probe" | "heavy" | "normal" {
 	return "normal";
 }
 
+function pickTimeout(cmd: string): { secs: number; why: string } {
+	// 解释器 / 包管理器跑的是任意脚本，给最宽的
+	const head = invokedNames(cmd)[0] ?? "";
+	if (head && INTERPRETERS.has(head.replace(/\.(exe|bat|cmd)$/i, ""))) {
+		return { secs: config.heavyTimeout, why: "解释器/包管理器" };
+	}
+	const kind = classify(cmd);
+	if (kind === "probe") return { secs: config.probeTimeout, why: "探查" };
+	if (kind === "heavy") return { secs: config.heavyTimeout, why: "构建" };
+	return { secs: config.analysisTimeout || config.defaultTimeout, why: "分析" };
+}
+
 function countSegments(cmd: string): number {
-	return cmd
-		.split(/&&|\|\||[;\n|]/)
-		.map((s) => s.trim())
-		.filter(Boolean).length;
+	return cmd.split(SEG_SPLIT).map((s) => s.trim()).filter(Boolean).length;
 }
 
 function head(cmd: string, n = 72): string {
@@ -382,109 +430,141 @@ function head(cmd: string, n = 72): string {
 	return one.length > n ? one.slice(0, n) + "…" : one;
 }
 
-function isAllowed(cmd: string, allow: string[]): boolean {
-	const low = cmd.toLowerCase();
-	return allow.some((a) => a && low.includes(a.toLowerCase()));
-}
-
-/** 找出命令里真正被调用的可执行文件名（忽略 cd/管道右侧的路径参数）。 */
-function invokedBinaries(cmd: string): string[] {
-	const out: string[] = [];
-	const re = /(?:^|[;&|(\n]|\bstart\s+(?:\/[bB]\s+)?)(?:"([^"]+\.(?:exe|bat|cmd))"|'([^']+\.(?:exe|bat|cmd))'|([^\s;&|()"']+\.(?:exe|bat|cmd)))/gi;
-	let m: RegExpExecArray | null;
-	while ((m = re.exec(cmd))) {
-		const raw = (m[1] || m[2] || m[3] || "").split(/[\\/]/).pop() || "";
-		if (raw) out.push(raw.toLowerCase());
-	}
-	return out;
-}
-
+/** 给 ssh/scp 补连接超时 + 心跳，bash 侧再断掉交互提示。 */
 function hardenSsh(cmd: string, shell: "bash" | "powershell"): { cmd: string; injected: string[] } {
 	const injected: string[] = [];
-
-	// 只在「真命令位置」注入，不能全文搜索 ssh ——
-	// 否则 echo "ssh is old" > f.txt 会被改成
-	// echo "ssh -o ConnectTimeout=15 ... is old" > f.txt（已实测踩过）。
-	// 命令位置 = 字符串开头，或 && || ; | ( 换行 之后的第一个词元。
+	// 只在「真命令位置」注入，否则 echo "ssh is old" 会被改写（这个坑踩过）
 	const SEG = /(^|[\n;|&(]\s*)((?:[\w.]+=\S+\s+)*)((?:ssh|scp|sftp|rsync))\b/gi;
 	const already = /ConnectTimeout/i.test(cmd);
-
 	let touched = false;
-	const out = cmd.replace(SEG, (m, lead: string, envPrefix: string, word: string) => {
+
+	let out = cmd.replace(SEG, (m, lead: string, envPrefix: string, word: string) => {
 		touched = true;
 		if (already) return m;
 		return lead + envPrefix + word + " -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3";
 	});
-	if (touched && !already) {
-		injected.push("ssh/scp: ConnectTimeout=15 + ServerAlive 心跳");
-	}
+	if (touched && !already) injected.push("ssh/scp: ConnectTimeout=15 + ServerAlive 心跳");
 
-	// ssh 的交互式提示（Are you sure / password）会把管道挂住。bash 侧补 </dev/null。
-	// 同样只在真命令位置成立、且命令自己没有 stdin 重定向时才补。
 	const hasRealSsh = /(^|[\n;|&(]\s*)((?:[\w.]+=\S+\s+)*)(?:ssh)\b/i.test(cmd);
-	let finalCmd = out;
-	if (shell === "bash" && hasRealSsh && !/<\s*\/dev\/null/.test(out) && !/<\s*\S/.test(out) && !/<\s*</.test(out)) {
-		finalCmd = out + " < /dev/null";
+	if (shell === "bash" && hasRealSsh && !/<\s*\//.test(out)) {
+		out = out + " < /dev/null";
 		injected.push("ssh: </dev/null 断交互");
 	}
-	return { cmd: finalCmd, injected };
+	return { cmd: out, injected };
 }
 
-/* ────────────────────────────── 扩展主体 ────────────────────────────── */
+/* ─────────────────────────── 记账 ─────────────────────────── */
 
-export default function cmdGuard(pi: ExtensionAPI) {
-	const running = new Map<string, CallRecord>();
-	const history: HistoryEntry[] = [];
-	const blocked: { at: string; cmd: string; reason: string }[] = [];
-	let stats = { guarded: 0, injected: 0, blocked: 0 };
-	let ticker: ReturnType<typeof setInterval> | null = null;
-	let enabled = true;
+interface CallRecord {
+	command: string;
+	shell: "bash" | "powershell";
+	startedAt: number;
+	lastOutputAt: number;
+	injected: string[];
+	notes: string[];
+	ownTimeout: number | null;
+}
 
-	function fmtSec(ms: number): string {
-		const s = Math.floor(ms / 1000);
-		return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
+interface HistoryEntry {
+	at: string;
+	toolName: string;
+	head: string;
+	seconds: number;
+	verdict: string;
+}
+
+type TextContent = { type: "text"; text: string };
+
+const running = new Map<string, CallRecord>();
+const history: HistoryEntry[] = [];
+const blocked: { at: string; cmd: string; reason: string }[] = [];
+let stats = { guarded: 0, injected: 0, blocked: 0 };
+let ticker: ReturnType<typeof setInterval> | null = null;
+let enabled = true;
+
+/** 最近一次事件回调带来的 ctx —— 用来访问 ui（ExtensionAPI 本身没有 ui） */
+let hostCtx: any = null;
+
+function fmtSec(ms: number): string {
+	const s = Math.floor(ms / 1000);
+	return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
+}
+
+function stopTicker(): void {
+	if (ticker) {
+		clearInterval(ticker);
+		ticker = null;
 	}
+}
 
-	function stopTicker() {
-		if (ticker) {
-			clearInterval(ticker);
-			ticker = null;
-		}
+function renderStatus(): void {
+	const ui = hostCtx?.ui;
+	if (!ui?.setStatus) return;
+	if (!running.size) {
+		ui.setStatus("cmd-guard", stats.guarded || stats.blocked ? `⛨ guard · 守卫${stats.guarded} · 拦${stats.blocked}` : undefined);
+		return;
 	}
+	const parts: string[] = [];
+	for (const r of running.values()) {
+		const total = Date.now() - r.startedAt;
+		const silent = Date.now() - r.lastOutputAt;
+		const mark = total >= config.stallSeconds ? "✖" : silent >= config.noOutputStallSeconds ? "◐" : "●";
+		parts.push(`${mark} ${r.shell} ${fmtSec(total)} · 静默 ${fmtSec(silent)} · ${head(r.command, 40)}`);
+	}
+	ui.setStatus("cmd-guard", "⛨ " + parts.join("  |  "));
+}
 
-	function renderStatus(ctx: any) {
-		if (!ctx?.ui?.setStatus) return;
+function ensureTicker(): void {
+	if (ticker) return;
+	ticker = setInterval(() => {
 		if (!running.size) {
-			ctx.ui.setStatus("cmd-guard", undefined);
+			stopTicker();
+			renderStatus();
 			return;
 		}
-		const parts: string[] = [];
-		for (const r of running.values()) {
-			const total = Date.now() - r.startedAt;
-			const silent = Date.now() - r.lastOutputAt;
-			const mark = total >= config.stallSeconds ? "✖" : silent >= config.noOutputStallSeconds ? "◐" : "●";
-			const inject = r.injected.length ? ` ·已注入 ${r.injected.length} 条` : "";
-			parts.push(`${mark} ${r.toolName} ${fmtSec(total)} · 静默 ${fmtSec(silent)}${inject} · ${head(r.command, 40)}`);
+		renderStatus();
+	}, 1000);
+	if (typeof ticker.unref === "function") ticker.unref();
+}
+
+/* ───────────────────────── 扩展主体 ───────────────────────── */
+
+export default function cmdGuard(pi: any): void {
+	if (process.env.CMD_GUARD === "0") {
+		enabled = false;
+		return;
+	}
+
+	loadConfig(true);
+
+	// 启动横幅：规则来源必须看得见。静默降级是这个插件最坏的失败模式。
+	const active = [...guiTable.entries()].filter(([, v]) => v !== null).length;
+	console.error(
+		`[cmd-guard] 已加载 · timeout ${config.probeTimeout}/${config.analysisTimeout || config.defaultTimeout}/${config.heavyTimeout}s` +
+			` · GUI 拦截 ${active} 条 · 规则来源 ${rulesSource}` +
+			` · 卡死阈值 ${config.stallSeconds}s · 静默阈值 ${config.noOutputStallSeconds}s` +
+			`${config.enforce ? "" : " · ★enforce=false，只记账不阻断"}` +
+			`${config.blockGui ? "" : " · ★blockGui=false，不拦 GUI"}`,
+	);
+
+	// ── 上下文捕获：ExtensionAPI 没有 ui，ui 在 handler 的第二个参数上 ──
+	const remember = (ctx: any): void => {
+		if (ctx) hostCtx = ctx;
+	};
+
+	pi.on("session_start", (_e: unknown, ctx: any) => {
+		remember(ctx);
+		if (!guiTable.size || rulesSource.includes("★")) {
+			ctx?.ui?.notify?.(
+				`cmd-guard 降级中：${rulesSource}\n` +
+					`GUI 拦截只剩内置兜底表。设 RELAB_SKILL_ROOT 指向技能包根，或在 cmd-guard.rules.json 写 toolChainPaths。`,
+				"warning",
+			);
 		}
-		const srcNote = rulesSource === "内置基线" ? " ·规则源=内置基线，索引未加载" : ` ·规则源=${rulesSource}`;
-		ctx.ui.setStatus("cmd-guard", "⛨ " + parts.join("  |  ") + srcNote);
-	}
+	});
 
-	function ensureTicker(ctx: any) {
-		if (ticker) return;
-		ticker = setInterval(() => {
-			if (!running.size) {
-				stopTicker();
-				renderStatus(ctx);
-				return;
-			}
-			renderStatus(ctx);
-		}, 1000);
-		if (typeof ticker.unref === "function") ticker.unref();
-	}
-
-	/* ── 拦截/改写 ── */
 	pi.on("tool_call", (event: any, ctx: any) => {
+		remember(ctx);
 		if (!enabled) return;
 		const name = event.toolName;
 		if (name !== "bash" && name !== "powershell") return;
@@ -493,78 +573,86 @@ export default function cmdGuard(pi: ExtensionAPI) {
 		if (!cmd.trim()) return;
 
 		loadConfig();
-		if (isAllowed(cmd, config.allow)) return;
+		if (config.allow.some((a) => a && cmd.toLowerCase().includes(a.toLowerCase()))) return;
 
 		const injected: string[] = [];
 		const notes: string[] = [];
 
 		/* 1. GUI / 交互式二进制 —— 物理拦下，这是 die.exe 那次挂死的根因 */
-		const guiHit = invokedBinaries(cmd).find((b) => guiTable.has(b));
-		if (guiHit) {
-			const use = guiTable.get(guiHit) || "";
-			const reason =
-				`[cmd-guard] 已拦下：\`${guiHit}\` 是 GUI/交互式二进制。\n` +
-				`它会弹窗等输入、零 stdout、进程永不退出 —— 一旦同步等它，模型全程不运行且无法自愈（终端计时器会一直涨而 token 停止）。\n` +
-				(use ? `改用：${use}\n` : "") +
-				`原则：能用 CLI 用 CLI，能用 MCP 用 MCP，都不行才开 GUI，GUI 禁入 bash。`;
-			blocked.push({ at: new Date().toISOString().slice(11, 19), cmd: head(cmd, 100), reason: head(reason, 100) });
-			stats.blocked++;
-			if (ctx?.ui?.notify) ctx.ui.notify(`cmd-guard 拦下 ${guiHit}：改用 CLI 版`, "warning");
-			return { block: true, reason };
+		if (config.blockGui) {
+			const hit = findGui(cmd);
+			if (hit) {
+				const reason =
+					`[cmd-guard] 已拦下：\`${hit[0]}\` 是 GUI/交互式程序。\n` +
+					`它会弹窗等输入、零 stdout、进程永不退出；命令阻塞期间模型不在运行，物理上无法自愈。\n` +
+					`改用：${hit[1]}\n` +
+					`工具真实路径怎么查：先跑 \`(Get-Command <工具id> -ErrorAction SilentlyContinue).Source\`，` +
+					`无值再按 TOOL-CHAIN.md 的四级递进（env → PATH → _map.json 别名 → 递归兜底）。\n` +
+					`确实只能用 GUI 时：宿主有界面控制能力（computer-use 等）就开界面会话，别在 bash 里同步等；` +
+					`否则加 \`cmd-guard-skip\` 到命令里临时放行并立刻中断。`;
+				blocked.push({ at: new Date().toISOString().slice(11, 19), cmd: head(cmd, 100), reason: head(reason, 100) });
+				stats.blocked++;
+				if (config.enforce) {
+					ctx?.ui?.notify?.(`cmd-guard 拦下 ${hit[0]}：改用 ${hit[1].slice(0, 60)}`, "warning");
+					return { block: true, reason };
+				}
+				notes.push(`\`${hit[0]}\` 在 GUI 名单里但 enforce=false，本次未拦。`);
+			}
 		}
 
 		/* 2. timeout —— 不传就是无限等，这里替模型补上 */
-		const kind = classify(cmd);
-		const idx = indexTimeoutFor(cmd);
-		let want = kind === "probe" ? config.probeTimeout : kind === "heavy" ? config.heavyTimeout : config.defaultTimeout;
-		if (kind !== "heavy" && idx.secs > 0) {
-			// 索引「默认 timeout」列为事实源；只有索引值更高时才抬升（探查类不抬）
-			if (kind === "probe" && idx.secs > want) want = idx.secs;
-			else if (kind === "normal") want = idx.secs;
-		}
+		const cur = typeof event.input.timeout === "number" && event.input.timeout > 0 ? event.input.timeout : 0;
 		if (RECURSIVE_SCAN.test(cmd) || DRIVE_ROOT_SCAN.test(cmd)) {
-			if (event.input.timeout === undefined || event.input.timeout < 180) {
-				event.input.timeout = Math.max(event.input?.timeout ?? 0, 180);
-				injected.push(`timeout=180（递归大目录扫描）`);
+			const want = Math.max(config.scanTimeout, cur);
+			if (want !== cur) {
+				event.input.timeout = want;
+				injected.push(`timeout=${want}（递归大目录扫描）`);
+			} else {
+				injected.push(`timeout=${cur}（模型自带，递归扫描）`);
 			}
-		} else if (event.input.timeout === undefined) {
-			event.input.timeout = want;
-			injected.push(`timeout=${want}（${kind}）`);
+		} else if (!cur) {
+			const t = pickTimeout(cmd);
+			event.input.timeout = t.secs;
+			injected.push(`timeout=${t.secs}（${t.why}）`);
 		} else {
-			injected.push(`timeout=${event.input.timeout}（模型自带）`);
+			injected.push(`timeout=${cur}（模型自带）`);
 		}
 
 		/* 3. ssh / scp 有界化 */
-		const hardened = hardenSsh(cmd, shell);
-		if (hardened.cmd !== cmd) {
-			cmd = hardened.cmd;
-			event.input.command = cmd;
-			injected.push(...hardened.injected);
+		if (config.hardenSsh && /\b(ssh|scp|sftp|rsync)\b/i.test(cmd)) {
+			const hardened = hardenSsh(cmd, shell);
+			if (hardened.cmd !== cmd) {
+				cmd = hardened.cmd;
+				event.input.command = cmd;
+				injected.push(...hardened.injected);
+			}
 		}
 
-		/* 4. 链长 —— 只提示不拦，避免误伤正当的多步操作 */
+		/* 4. 链长等坑 —— 只提示不拦，避免误伤正当的多步操作 */
 		const segs = countSegments(cmd);
 		if (segs > 8) {
 			notes.push(
-				`单条命令串了 ${segs} 段（>8）。任一段等交互或打错路径，整条就死，且出错时前面产物落在哪说不清。拆成多条单独调用。`
+				`单条命令串了 ${segs} 段（>8）。任一段等交互或打错路径，整条就死，且出错时前面产物落在哪说不清。拆成多条单独调用。`,
 			);
 		}
-		if (/\/(tmp|var\/tmp)\b|\bC:\\tmp\b/i.test(cmd) && /\bssh\b|\bscp\b/i.test(cmd)) {
-			notes.push("同一条命令里混用了 POSIX 路径（Git-Bash 下 `/tmp` 实为 `C:\\tmp`）与 Windows 路径，远程端路径几乎必错。两端路径分两次调用，别混写。");
+		if (/\/(tmp|var\/tmp)\b|\bC:\\tmp\b/i.test(cmd) && /\b(ssh|scp)\b/i.test(cmd)) {
+			notes.push(
+				"同一条命令里混用了 POSIX 路径（Git-Bash 下 `/tmp` 实为 `C:\\tmp`）与 Windows 路径，远程端路径几乎必错。两端路径分两次调用，别混写。",
+			);
 		}
 		if (/\bstart\s+(?!\/[bB])/i.test(cmd) && shell === "powershell") {
 			notes.push("`start` 不带 /b 会新开一个独立窗口并立刻返回，后台进程不受管。改用 `start /b ... > log 2>&1` + 轮询产物。");
 		}
 		if (/\bvmrun\b.*\b(snapshot|suspend)\b/i.test(cmd)) {
-			notes.push("`vmrun snapshot/suspend` 是 VIX 同步调用，客户机运行中/实时扫描/快照锁争用时可无限期挂起。改成后台执行 + 轮询 `*.vmsn` 是否落地。");
+			notes.push(
+				"`vmrun snapshot/suspend` 是 VIX 同步调用，VM 运行中 / 实时扫描 / 快照锁争用时可无限期挂起。改成后台执行 + 轮询 `*.vmsn` 是否落地。",
+			);
 		}
 
 		stats.guarded++;
 		stats.injected += injected.length;
 
 		running.set(event.toolCallId, {
-			toolCallId: event.toolCallId,
-			toolName: name,
 			command: cmd,
 			shell,
 			startedAt: Date.now(),
@@ -573,46 +661,67 @@ export default function cmdGuard(pi: ExtensionAPI) {
 			notes,
 			ownTimeout: typeof event.input.timeout === "number" ? event.input.timeout : null,
 		});
-		ensureTicker(ctx);
-		renderStatus(ctx);
+		ensureTicker();
+		renderStatus();
 		return;
 	});
 
-	/* ── 有输出就刷新静默计时 ── */
-	pi.on("tool_execution_update", (event: any) => {
+	/* 有输出就刷新静默计时 */
+	pi.on("tool_execution_update", (event: any, ctx: any) => {
+		remember(ctx);
 		const r = running.get(event.toolCallId);
 		if (r) r.lastOutputAt = Date.now();
 	});
 
-	/* ── 结束：记账 + 把提示回灌给模型，让它自己改 ── */
+	/* 结束：记账 + 把提示回灌给模型，让它自己改 */
 	pi.on("tool_result", (event: any, ctx: any) => {
+		remember(ctx);
 		const r = running.get(event.toolCallId);
 		if (!r) return;
 		running.delete(event.toolCallId);
-		renderStatus(ctx);
 		if (!running.size) stopTicker();
+		renderStatus();
 
 		const secs = Math.round((Date.now() - r.startedAt) / 1000);
 		const verdict = event.isError ? "失败" : "完成";
-		history.unshift({ at: new Date().toISOString().slice(11, 19), toolName: r.toolName, head: head(r.command, 60), seconds: secs, verdict });
+		history.unshift({
+			at: new Date().toISOString().slice(11, 19),
+			toolName: r.shell,
+			head: head(r.command, 60),
+			seconds: secs,
+			verdict,
+		});
 		if (history.length > 20) history.length = 20;
 
+		if (secs >= config.stallSeconds) {
+			history[0].verdict += "（已过卡死阈值）";
+		}
+
 		if (r.notes.length) {
+			// 返回 content 才是官方改法；顺带把 structuredContent 带回去，否则会被丢
 			const line: TextContent = {
 				type: "text",
 				text:
-					`\n[cmd-guard 提示 · 改写后执行 ${secs}s · ${verdict}]\n` +
+					`\n[cmd-guard 提示 · ${secs}s · ${verdict}]\n` +
 					r.notes.map((n) => `- ${n}`).join("\n") +
 					(r.injected.length ? `\n（已自动注入：${r.injected.join("；")}）` : ""),
 			};
-			if (Array.isArray(event.content)) event.content = [...event.content, line];
+			if (Array.isArray(event.content)) {
+				return {
+					content: [...event.content, line],
+					details: event.details,
+					structuredContent: event.structuredContent,
+				};
+			}
 		}
+		return;
 	});
 
-	pi.on("agent_end", (_e: any, ctx: any) => {
+	pi.on("agent_end", (_e: unknown, ctx: any) => {
+		remember(ctx);
 		running.clear();
 		stopTicker();
-		renderStatus(ctx);
+		renderStatus();
 	});
 
 	pi.on("session_shutdown", () => {
@@ -621,62 +730,73 @@ export default function cmdGuard(pi: ExtensionAPI) {
 
 	/* ── /stall ── */
 	pi.registerCommand("stall", {
-		description: "命令执行健康报告：当前在跑什么、卡多久、守卫注入了什么、被拦过什么",
+		description: "命令执行健康报告：当前在跑什么、卡多久、注入了什么、被拦过什么",
 		handler: async (_arg: string, ctx: any) => {
+			remember(ctx);
 			loadConfig(true);
-			const lines: string[] = [];
-			lines.push("⛨ cmd-guard 状态");
-			lines.push(running.size ? "── 正在执行 ──" : "── 当前无命令在执行 ──");
+			const L: string[] = [];
+			L.push("⛨ cmd-guard 状态");
+			L.push(running.size ? "── 正在执行 ──" : "── 当前无命令在执行 ──");
 			for (const r of running.values()) {
 				const total = Date.now() - r.startedAt;
 				const silent = Date.now() - r.lastOutputAt;
-				lines.push(
-					`  ${r.toolName}  已 ${fmtSec(total)}  静默 ${fmtSec(silent)}  timeout=${r.ownTimeout ?? "无"}` +
-						`${total >= config.stallSeconds ? "  ✖ 已过卡死阈值" : silent >= config.noOutputStallSeconds ? "  ◐ 长时间无输出" : ""}`
+				L.push(
+					`  ${r.shell}  已 ${fmtSec(total)}  静默 ${fmtSec(silent)}  timeout=${r.ownTimeout ?? "无"}` +
+						`${total >= config.stallSeconds ? "  ✖ 已过卡死阈值" : silent >= config.noOutputStallSeconds ? "  ◐ 长时间无输出" : ""}`,
 				);
-				lines.push(`    ${head(r.command, 90)}`);
-				if (r.injected.length) lines.push(`    已注入：${r.injected.join("；")}`);
+				L.push(`    ${head(r.command, 90)}`);
+				if (r.injected.length) L.push(`    已注入：${r.injected.join("；")}`);
 			}
-			lines.push(`── 本会话 ──  守卫 ${stats.guarded} 次，注入 ${stats.injected} 条，拦下 ${stats.blocked} 次`);
-			lines.push(`  卡死阈值 ${config.stallSeconds}s / 静默阈值 ${config.noOutputStallSeconds}s / 默认 timeout ${config.defaultTimeout}s`);
-			lines.push(`  GUI 规则 ${guiTable.size} 条，规则源=${rulesSource}`);
+			L.push(
+				`── 本会话 ──  守卫 ${stats.guarded} 次，注入 ${stats.injected} 条，拦下 ${stats.blocked} 次`,
+			);
+			L.push(
+				`  卡死阈值 ${config.stallSeconds}s / 静默阈值 ${config.noOutputStallSeconds}s / 默认 timeout ${config.defaultTimeout}s`,
+			);
+			L.push(`  GUI 规则 ${[...guiTable.values()].filter((v) => v !== null).length} 条，规则源=${rulesSource}`);
 			if (blocked.length) {
-				lines.push("── 被拦下 ──");
-				for (const b of blocked.slice(0, 5)) lines.push(`  ${b.at}  ${b.cmd}\n    ${b.reason}`);
+				L.push("── 被拦下 ──");
+				for (const b of blocked.slice(0, 5)) L.push(`  ${b.at}  ${b.cmd}\n    ${b.reason}`);
 			}
 			if (history.length) {
-				lines.push("── 最近执行 ──");
-				for (const h of history.slice(0, 8)) lines.push(`  ${h.at}  ${String(h.seconds).padStart(5)}s  ${h.verdict}  ${h.toolName}  ${h.head}`);
+				L.push("── 最近执行 ──");
+				for (const h of history.slice(0, 8)) L.push(`  ${h.at}  ${String(h.seconds).padStart(5)}s  ${h.verdict}  ${h.toolName}  ${h.head}`);
 			}
-			lines.push("── 处置处方 ──");
-			lines.push("  卡在 ssh/scp   → 客户机是否在等输入？IP 是否写错？先 `ssh -n -o ConnectTimeout=5 <ip> echo ok` 单验连通。");
-			lines.push("  卡在 vmrun     → 快照写盘慢或锁争用。改后台 `start /b vmrun ... >log 2>&1 &` 后轮询 `*.vmsn`。");
-			lines.push("  卡在 GUI 二进制 → 已物理拦下，改用索引里的 CLI/MCP 版。");
-			lines.push("  卡在 find/grep  → 递归范围太大，收窄到子目录或加 `-maxdepth`。");
-			lines.push("  卡在 npx/npm    → 首次拉包或版本解析，加 timeout 并看 npm 缓存锁。");
-			lines.push("  计时器在涨 + token 不动 = 卡在命令（不在推理）→ Ctrl-C 中断，然后发「继续」；这种中断不会自愈。");
-			const text = lines.join("\n");
-			if (ctx?.ui?.notify) ctx.ui.notify(text, running.size ? "warning" : "info");
+			L.push("── 处置处方 ──");
+			L.push("  卡在 ssh/scp   → 对方是否在等输入？IP 是否写错？先 `ssh -n -o ConnectTimeout=5 <ip> echo ok` 单验连通。");
+			L.push("  卡在 vmrun     → 快照写盘慢或锁争用。改后台 `start /b vmrun ... >log 2>&1` 后轮询 `*.vmsn`。");
+			L.push("  卡在 GUI 二进制 → 已物理拦下，按拦截理由里的 CLI 替代走。");
+			L.push("  卡在 find/grep  → 递归范围太大，收窄到子目录或加 `-maxdepth`。");
+			L.push("  卡在 npx/npm    → 首次拉包或版本解析，加 timeout 并看包管理器缓存锁。");
+			L.push("  计时器在涨 + token 不动 = 卡在命令（不在推理）→ 中断换路线，发「继续」；这种中断不会自愈。");
+			ctx?.ui?.notify?.(L.join("\n"), running.size ? "warning" : "info");
 		},
 	});
 
-	/* ── /guard on|off ── */
+	/* ── /guard on|off|reload|rules ── */
 	pi.registerCommand("guard", {
-		description: "命令守卫开关：/guard off 关掉注入与拦截，/guard on 恢复",
+		description: "命令守卫开关：/guard off 关掉注入与拦截，/guard on 恢复，/guard reload 重读文档，/guard rules 看派生出的 GUI 名单",
 		handler: async (arg: string, ctx: any) => {
+			remember(ctx);
 			const a = (arg || "").trim().toLowerCase();
 			if (a === "off") enabled = false;
 			else if (a === "on") enabled = true;
 			else if (a === "reload") {
 				loadConfig(true);
 				loadedStamp = "0";
-				rulesMtime = 0;
+			} else if (a === "rules") {
+				const rows = [...guiTable.entries()].sort();
+				const L = rows.map(([k, v]) => (v === null ? `  ${k}  —— 明确不拦` : `  ${k}  →  ${v}`));
+				L.unshift(`GUI 名单 ${rows.length} 条（${rulesSource}）`);
+				ctx?.ui?.notify?.(L.join("\n"), "info");
+				return;
 			}
 			const msg =
-				`cmd-guard ${enabled ? "启用" : "停用"}｜GUI 规则 ${guiTable.size} 条（规则源=${rulesSource}）｜` +
-				`默认 timeout ${config.defaultTimeout}s（探查 ${config.probeTimeout}s / 重活 ${config.heavyTimeout}s）｜` +
-				`卡死阈值 ${config.stallSeconds}s｜规则文件 ${fs.existsSync(rulesPath()) ? rulesPath() : "（未建，用内置表）"}`;
-			if (ctx?.ui?.notify) ctx.ui.notify(msg, enabled ? "info" : "warning");
+				`cmd-guard ${enabled ? "启用" : "停用"}｜GUI 规则 ${[...guiTable.values()].filter((v) => v !== null).length} 条` +
+				`（规则源=${rulesSource}）｜timeout ${config.probeTimeout}/${config.analysisTimeout || config.defaultTimeout}/${config.heavyTimeout}s` +
+				`｜卡死阈值 ${config.stallSeconds}s｜enforce=${config.enforce} blockGui=${config.blockGui}` +
+				`｜规则文件 ${fileExists(rulesPath()) ? rulesPath() : "（未建，用内置默认）"}`;
+			ctx?.ui?.notify?.(msg, enabled ? "info" : "warning");
 		},
 	});
 }

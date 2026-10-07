@@ -41,8 +41,11 @@
 **换机一条命令：**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\restore-machine.ps1 -ToolRoot 'D:\HACKER' -PyRoot 'D:\EXE' -NewApiKey 'sk-…' -X64dbgToken '…'
+powershell -ExecutionPolicy Bypass -File scripts\restore-machine.ps1 -ToolRoot 'D:\Tools' -PyRoot 'D:\Tools\py' -NewApiKey 'sk-…' -X64dbgToken '…'
 ```
+
+> 不传 `-ToolRoot` / `-PyRoot` 时依次取环境变量 `REVERSE_TOOL_ROOT` / `REVERSE_PY_ROOT`，
+> 都没有才用 `D:\Tools` / `D:\Tools\py`。换盘不用改脚本。
 
 完整说明（含每个插件的仓库地址、版本、落盘位置与踩坑）见 **[docs/ENV-MANIFEST.md](docs/ENV-MANIFEST.md)**。
 
@@ -68,8 +71,9 @@ agent-plugins/
 │   ├── restore-machine.ps1        # Windows 换机恢复（幂等）
 │   ├── restore-machine.sh         # Git Bash / WSL 换机恢复
 │   ├── check-sync.ps1             # 本机扩展 vs 哈希基线对账
+│   ├── regen-extension-baseline.ps1 # 改了插件后重算基线（必跑，否则对账必报漂移）
 │   ├── split-servers.js           # agent-servers.json → 每 server 一个文件
-│   └── regen-manifest.js          # 在源机器上重新生成 manifest/
+│   └── regen-manifest.js          # 在源机器上重新生成 manifest/（泄露即报错）
 └── plugins/                       # 各智能体专属分类目录
     ├── dsh/                       # DeepSeek Harness 插件
     │   └── dsh-infinite-retry/    # 无限重试插件（带 UI 开关）
@@ -90,6 +94,35 @@ agent-plugins/
 1. **分级命名空间隔离**：不同智能体的技术栈（Cordis、piplug、MCP、CLI）彻底物理隔离，互不产生依赖污染。
 2. **独立自包含（Self-contained）**：每个插件自成一体，内含独立的 `package.json`、`README.md` 与许可证，支持直接单独拷贝或作为独立包分发。
 3. **用户体验优先**：关键行为变更（如重试策略、自动化工具）一律配备开关控件或配置项，支持随时停止与干净注销。
+
+## 🔁 改了插件之后（必做，否则下次换机会拿到旧版）
+
+```powershell
+# 1) 本机自测 —— 插件目录里都有 smoke 测试
+node plugins\pi\cmd-guard\smoke-cmd-guard.mjs
+
+# 2) 把新版本复制到本机 pi 家目录
+copy plugins\pi\cmd-guard\* "$env:USERPROFILE\.pi\agent\extensions\" -Force
+
+# 3) 重算基线并当场对账（一条命令同时做两件事）
+powershell -ExecutionPolicy Bypass -File scripts\regen-extension-baseline.ps1 -PiHome $env:USERPROFILE\.pi\agent
+
+# 4) 单独对账（正常机器上退出码 0）
+powershell -ExecutionPolicy Bypass -File scripts\check-sync.ps1
+
+# 5) 提交
+git add -A && git commit -m "..." && git push
+```
+
+**为什么第 3 步不能省**：基线里的哈希是手改的话，换机时 `pi install` 按基线校验就会失败；
+基线里写了仓库里根本不存在的文件（本仓库曾经躺着 3 个 `orca-*`），则 check-sync 永远报 MISSING。
+两者都是同一个病：**基线必须由仓库内容生成，不能由记忆生成。**
+
+`regen-extension-baseline.ps1` 的收录规则是「扫 `plugins/*/*/` 下的 `*.ts`、`*.rules.json`、
+`smoke-*.mjs`」，所以新增插件不用改脚本。唯一的例外：想保留参考但**不要**装到机器上的插件，
+在它目录里放一个 `RETIRED` 文件就会被自动跳过（`plugins/pi/pi-infinite-retry/` 就是这么处理的）。
+
+---
 
 ---
 

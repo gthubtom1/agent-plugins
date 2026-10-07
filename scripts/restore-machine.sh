@@ -2,15 +2,15 @@
 # 换机恢复本机 Pi Agent 环境（Git Bash / WSL 用法；幂等）。
 # 依赖：node >= 22.19、npm、pi（@earendil-works/pi-coding-agent 1.0.0）
 # 用法：
-#   TOOL_ROOT='D:\HACKER' PY_ROOT='D:\EXE' NEWAPI_KEY='sk-…' X64DBG_TOKEN='…' ./scripts/restore-machine.sh
+#   TOOL_ROOT='D:\Tools' PY_ROOT='D:\Tools\py' NEWAPI_KEY='sk-…' X64DBG_TOKEN='…' ./scripts/restore-machine.sh
 #   SKIP_INSTALL=1 ./scripts/restore-machine.sh     # 只恢复配置，不装包
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PI_HOME="${PI_HOME:-$HOME/.pi/agent}"
 AGENTS_HOME="${AGENTS_HOME:-$HOME/.agents}"
-TOOL_ROOT="${TOOL_ROOT:-D:\HACKER}"
-PY_ROOT="${PY_ROOT:-D:\EXE}"
+TOOL_ROOT="${TOOL_ROOT:-${REVERSE_TOOL_ROOT:-D:\Tools}}"
+PY_ROOT="${PY_ROOT:-${REVERSE_PY_ROOT:-D:\Tools\py}}"
 NEWAPI_KEY="${NEWAPI_KEY:-}"
 X64DBG_TOKEN="${X64DBG_TOKEN:-}"
 STAMP="$(date +%Y%m%d-%H%M%S)"

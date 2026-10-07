@@ -1,31 +1,37 @@
 {
-  "_说明": "cmd-guard 规则 —— VM 版。改完 60 秒内自动生效，或 /guard reload 立即生效。",
-  "_与宿主版的区别": [
-    "blockGui = false —— 客户机里 GUI 工具是正常手段（PE-bear / ImHex / x64dbg GUI 等），不能拦。",
-    "indexPaths 指向本机的 tool-index（C:\\LAB\\...），不是宿主机的 D:\\Project\\...。",
-    "其余（timeout 注入 / 卡死阈值 / 无界命令兜底）与宿主版一致。"
+  "_说明": "cmd-guard 规则 —— 客户机 / VM 版。把本文件复制成同目录的 cmd-guard.rules.json 即生效。",
+
+  "_与本机版的唯一实质区别": [
+    "blockGui = false —— 客户机里 GUI 工具是正常手段（x64dbg GUI / PE-bear / ImHex 都是主力），不能拦。",
+    "timeout 兜底、卡死记账、ssh 有界化与本机版完全一致，一个没少。"
   ],
+  "_为什么单独一份而不是改代码": "同一份 cmd-guard.ts 装在两台机器上，差别只在一个布尔。规则跟着机器走，代码不跟着机器走。",
+
+  "skillRoot": null,
+
+  "toolChainPaths": [],
 
   "defaultTimeout": 120,
-  "_timeout说明": "模型不传 timeout 时自动补这个值。探查 30s / 普通 120s / 重活 600s。",
+  "_timeout说明": "客户机上工具更慢（VM 里尤其），探查档从 30s 抬到 60s。",
+  "probeTimeout": 60,
+  "analysisTimeout": 180,
+  "heavyTimeout": 900,
+  "scanTimeout": 240,
 
-  "probeTimeout": 30,
-  "heavyTimeout": 600,
-  "stallSeconds": 240,
-  "noOutputStallSeconds": 90,
+  "stallSeconds": 300,
+  "noOutputStallSeconds": 120,
+
   "enforce": true,
+  "_enforce说明": "仍然保持 true —— 拦截已经关了，但 timeout 注入是这版唯一还在物理生效的东西，关掉它这版就什么都不是了。",
 
-  "_blockGui说明": "true=物理拦住 GUI 二进制（宿主用）；false=放行但注入 timeout 兜底（客户机用）。",
   "blockGui": false,
+  "_blockGui说明": "★ 客户机版的唯一实质差别。false = 不拦 GUI，只注入 timeout 兜底。",
 
-  "_guiBinaries_说明": "手工补充/覆盖 GUI 名单。blockGui=false 时此表不生效。",
-  "guiBinaries": [],
+  "hardenSsh": true,
 
-  "_allow_说明": "整条命令含其中任一子串就整条跳过守卫（救急用）。",
-  "allow": ["cmd-guard-skip"],
+  "_guiBinaries说明": "本机版基本不用填。真要拦某几个（怕它们吃掉交互式会话），在这里逐条写。值为 null 表示明确不拦。",
+  "guiBinaries": {},
 
-  "_indexPaths_说明": "技能包索引路径（生成物）。本机在 C:\\LAB 下。",
-  "indexPaths": [
-    "C:\\LAB\\skillpack\\skills\\tool-index.md"
-  ]
+  "_allow说明": "救急用。",
+  "allow": ["cmd-guard-skip"]
 }

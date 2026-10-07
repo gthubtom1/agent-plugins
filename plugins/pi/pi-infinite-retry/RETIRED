@@ -1,0 +1,10 @@
+本插件已被 `plugins/pi/retry-level` 取代，保留在仓里只作参考。
+
+**不要把它装到机器上** —— `scripts/regen-extension-baseline.ps1` 看到本文件会跳过本目录，
+基线里也不会出现 `index.ts`，换机恢复时不会误装。
+
+取代关系：
+- 本插件：遇网络波动无限重试，没有档位、没有状态栏
+- retry-level：off / 3 / 5 / 15 / 30 / 无限 六个档位，状态栏常显当前档位
+
+要用重试就用 retry-level。

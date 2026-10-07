@@ -1,20 +1,37 @@
 {
-  "_说明": "cmd-guard 规则。改完 60 秒内自动生效，或 /guard reload 立即生效。",
+  "_说明": "cmd-guard 规则。改完 30 秒内自动生效，或 /guard reload 立即生效。",
+
+  "_技能包根": "留空(null) = 自动探测。探测顺序：环境变量 RELAB_SKILL_ROOT / REVERSE_SKILL_ROOT → 本文件往上找含 TOOL-CHAIN.md 的目录 → C:/relab2、C:/relab。换机不用改这里。",
+  "skillRoot": null,
+
+  "_文档来源": "额外再从这些 Markdown 派生 GUI 名单（`` `a.exe`→`b` `` 或表格行）。默认已含 <技能包根>/TOOL-CHAIN.md、skillpack/skills/TOOLS.md、skillpack/skills/SKILL.md。写绝对路径才生效；不存在就跳过。",
+  "toolChainPaths": [],
+
   "defaultTimeout": 120,
+  "_timeout说明": "模型不传 timeout 时自动补这个值。三档：探查 30s / 分析 120s / 构建·解释器 600s。",
   "probeTimeout": 30,
+  "analysisTimeout": 120,
   "heavyTimeout": 600,
+  "scanTimeout": 180,
+  "_scanTimeout说明": "递归大目录扫描 / 盘符根扫描的最低 timeout。这两种命令最容易被误设成 30s 然后被杀。",
+
   "stallSeconds": 240,
+  "_stall说明": "超过它还没结束 = 疑似卡死，底栏变红并进 /stall 报告。",
   "noOutputStallSeconds": 90,
+  "_noOutput说明": "超过它没有新输出，底栏变黄（还在跑，可能只是慢）。靠 tool_execution_update 判定。",
+
   "enforce": true,
+  "_enforce说明": "false = 只记账不阻断。想先观察守卫判得准不准时用它，出问题再打开。",
 
-  "_guiBinaries_说明": "手工补充/覆盖。优先级：内置基线 < 索引派生 < 本列表。索引(tool-index.md)里标『运行模式=GUI』的行会自动进黑名单，此处只需写索引里没有的，或要覆盖索引判定的手工项。例：把某个索引标 CLI 的工具强制当 GUI，就在这里写它的 exe 名。",
-  "guiBinaries": [],
+  "blockGui": true,
+  "_blockGui说明": "true = 物理拦住 GUI 二进制（本机用）；false = 放行 GUI，但 timeout 兜底照旧。客户机 / VM 上 GUI 是正当手段（x64dbg GUI 就是主战场），把这份文件复制成 cmd-guard.rules.json 并把 blockGui 改 false。",
 
-  "_allow_说明": "整条命令含其中任一子串就整条跳过守卫（救急用，慎用）。",
-  "allow": ["cmd-guard-skip"],
+  "hardenSsh": true,
+  "_hardenSsh说明": "给真命令位置上的 ssh/scp/sftp/rsync 补 -o ConnectTimeout=15 与心跳，bash 侧再补 </dev/null 断交互提示。",
 
-  "_indexPaths_说明": "技能包索引路径（生成物）。索引刷新后守卫自动生效，守卫代码不用改。",
-  "indexPaths": [
-    "D:\\Project\\skills-hub\\integrated-skill-hub\\skills\\tool-index.md"
-  ]
+  "_guiBinaries说明": "手工补充/覆盖。值 = 给模型的替代提示语；值写 null 或空串 = 明确不拦这一条。优先级最高，会覆盖 TOOL-CHAIN.md 的派生结果。索引不存在的工具、或者要把某个工具从拦改成不拦，都写这里。",
+  "guiBinaries": {},
+
+  "_allow说明": "整条命令含其中任一子串就整条跳过守卫（救急用，慎用）。默认的 cmd-guard-skip 可以让单条命令临时放行。",
+  "allow": ["cmd-guard-skip"]
 }
