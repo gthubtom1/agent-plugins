@@ -1,0 +1,17 @@
+# 统一按 LF 存、按 LF 检出。
+#
+# 为什么必须写这一行：
+#   本机 core.autocrlf=true。git 在**检出**时会把 LF 转成 CRLF。
+#   而 manifest/extensions.sha256.json 里记的是**逐字节** SHA256。
+#   换机克隆出来的文件只要是 CRLF，哈希就对不上，check-sync 永远报 DIFF ——
+#   而 check-sync 恰恰是「这台机器装的是不是最新版」的唯一裁判。
+#   实测过：不加这一行，克隆出来的 cmd-guard.ts 哈希是 31af816f…，基线是 f85a6481…。
+#
+# text=auto 让 git 自行判断文本/二进制；二进制（图片、压缩包）不受影响。
+* text=auto eol=lf
+
+# 这两类是逐字节校验的对象，规则再明确一次，别让以后有人改错。
+*.ts        text eol=lf
+*.mjs       text eol=lf
+*.js        text eol=lf
+*.rules.json text eol=lf
