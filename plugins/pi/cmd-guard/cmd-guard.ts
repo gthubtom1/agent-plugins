@@ -170,10 +170,11 @@ function findSkillRoot(configured: string | null): string | null {
 
 	// 3) 习惯位置（换盘用环境变量覆盖即可）
 	candidates.push("C:/relab2", "C:/relab", "D:/relab2");
-
-	// 4) 旧世界路径，只为兼容老 rules.json
-	candidates.push("D:/Project/skills-hub/integrated-skill-hub");
-
+	// 3) 习惯位置。换盘 / 换机器用环境变量覆盖即可，不要往这里堆历史路径 ——
+	//    那是「不许猜路径」纪律要治的病：探一个谁也说不清在哪的目录，
+	//    探到了说不清是哪台机器的，探不到又看不出原因。
+	//    确实装在别处 → 设 RELAB_SKILL_ROOT，或在 rules.json 写 skillRoot / toolChainPaths。
+	candidates.push("C:/relab2", "C:/relab", "D:/relab2");
 	const seen = new Set<string>();
 	for (const c of candidates) {
 		const abs = path.resolve(c);
