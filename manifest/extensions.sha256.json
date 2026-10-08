@@ -3,7 +3,7 @@
   "regenerate_with": "scripts/regen-extension-baseline.ps1",
   "files": {
     "cmd-guard.rules.json": "5fc62fc03bd98cc8359e2973409419df92578bf89574a410b824edfdbcc2df64",
-    "cmd-guard.ts": "f85a648146157c6d6e096235a0008010ec737cda1e9c07e060e0762e303cd4d5",
+    "cmd-guard.ts": "db2eacdf0bd927d7f0163e00c5ebe51b1702031aa2b0e6417631bdf7a4d30d64",
     "smoke-cmd-guard.mjs": "91fa6f0037f2fcfe0078c52c1338947db0f2468c600e83541ee5649243fb8825",
     "retry-level.ts": "e88dafbda5fe77b668e27215a99b7ee2b90d81f23f2382e86320cd5d5c445688"
   },

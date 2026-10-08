@@ -140,8 +140,22 @@ function fileExists(p: string): boolean {
 	}
 }
 
+/**
+ * TOOL-CHAIN.md 在包内的位置。
+ * 现行布局：skillpack/TOOL-CHAIN.md（必须随 skillpack/ 一起分发，否则按 AI-INSTALL.md
+ * 只装 skillpack/ 的机器上，TOOLS.md 里的链接就是死的，verify-doc-links.py 也会报断链）。
+ * 早期布局：<根>/TOOL-CHAIN.md。两种都认，换布局不用改代码。
+ */
+function chainPath(root: string): string | null {
+	for (const rel of [path.join("skillpack", "TOOL-CHAIN.md"), "TOOL-CHAIN.md"]) {
+		const p = path.join(root, rel);
+		if (fileExists(p)) return p;
+	}
+	return null;
+}
+
 function looksLikeRoot(dir: string): boolean {
-	return fileExists(path.join(dir, "TOOL-CHAIN.md"));
+	return chainPath(dir) !== null;
 }
 
 /**
@@ -190,8 +204,8 @@ function findSkillRoot(configured: string | null): string | null {
 function docSources(config: GuardConfig, root: string | null): string[] {
 	const out: string[] = [];
 	if (root) {
-		const main = path.join(root, "TOOL-CHAIN.md");
-		if (fileExists(main)) out.push(main);
+		const main = chainPath(root);
+		if (main) out.push(main);
 		// 技能包里其它也会写 GUI 替代方案的地方，一并认（存在才认）
 		for (const rel of ["skillpack/skills/TOOLS.md", "skillpack/skills/SKILL.md"]) {
 			const p = path.join(root, rel);

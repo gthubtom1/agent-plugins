@@ -106,7 +106,7 @@ timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional,
 
 - **加工具不用碰插件。** 文档里加一行 `` `foo.exe`→`foo-cli` ``，下次调用就认得。
 - **文档删了，拦截自动消失。** 不存在「清单过时」这个问题。
-- **换机零配置。** 插件会自动往上找含 `TOOL-CHAIN.md` 的目录（`kernel/extensions/pi/` → 根），
+- **换机零配置。** 插件会自动往上找含 `TOOL-CHAIN.md` 的目录（现为 `skillpack/TOOL-CHAIN.md`，早期是仓根 `TOOL-CHAIN.md`，两种布局都认），
   找不到再依次试环境变量 `RELAB_SKILL_ROOT` / `REVERSE_SKILL_ROOT`、习惯位置 `C:\relab2`。
   全找不到时**只退到内置兜底表，并在启动横幅和会话通知里明说「★未找到 TOOL-CHAIN.md」**。
 
