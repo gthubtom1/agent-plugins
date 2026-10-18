@@ -241,9 +241,9 @@ async function runTests() {
 	// =========================================================================
 	console.log("\n--- Test 6: 文件不存在/空文件容错性 ---");
 	// Import loaders to test empty/missing file resilience directly
-	const { PersonalityLoader } = await import("file:///C:/Users/toti/.pi/agent/extensions/omp-prompt-compat/personality-loader.js");
-	const { RulesLoader } = await import("file:///C:/Users/toti/.pi/agent/extensions/omp-prompt-compat/rules-loader.js");
-	const { assembleCompatibilitySections } = await import("file:///C:/Users/toti/.pi/agent/extensions/omp-prompt-compat/prompt-assembly.js");
+	const { PersonalityLoader, RulesLoader, assembleCompatibilitySections, promptSourceContainsRule } = await import(
+		new URL("./prompt-compat.ts", import.meta.url).href
+	);
 
 	const pLoader = new PersonalityLoader();
 	const rLoader = new RulesLoader();
@@ -268,7 +268,6 @@ async function runTests() {
 	// Test 7: Paragraph-Level Deduplication
 	// =========================================================================
 	console.log("\n--- Test 7: OMP 去重算法验证 (Paragraph-Level Deduplication) ---");
-	const { promptSourceContainsRule } = await import("file:///C:/Users/toti/.pi/agent/extensions/omp-prompt-compat/dedupe.js");
 	const sampleSource = "System prompt header\n\nRule A: Do not hallucinate\n\nRule B: Be precise\n\nFooter note";
 	const containedRule = "Rule A: Do not hallucinate";
 	const uncontainedRule = "Rule C: Something completely absent";

@@ -2,9 +2,9 @@
   "name": "pi-prompt-compat",
   "version": "1.0.0",
   "description": "Pi Coding Agent 人格 (PERSONALITY.md) 与全局粘性规则 (RULES.md) 提示词兼容层扩展",
-  "main": "index.ts",
+  "main": "prompt-compat.ts",
   "scripts": {
-    "test": "bun test.mjs"
+    "test": "bun smoke-prompt-compat.mjs"
   },
   "keywords": [
     "pi",

@@ -12,7 +12,8 @@
     "_说明": "本清单让 'pi install git:github.com/gthubtom1/agent-plugins' 一条命令装完所有 PI 侧自制插件。新增插件时记得往这里加。",
     "extensions": [
       "./plugins/pi/cmd-guard/cmd-guard.ts",
-      "./plugins/pi/retry-level/retry-level.ts"
+      "./plugins/pi/retry-level/retry-level.ts",
+      "./plugins/pi/pi-prompt-compat/prompt-compat.ts"
     ],
     "_extensions_不含": [
       "./plugins/pi/pi-infinite-retry/index.ts  —— 老的简版 retry，与 retry-level 功能重叠（都注册 /retry）。",
