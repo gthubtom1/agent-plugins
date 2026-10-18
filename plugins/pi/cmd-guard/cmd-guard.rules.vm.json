@@ -1,0 +1,37 @@
+{
+  "_说明": "cmd-guard 规则 —— 客户机 / VM 版。把本文件复制成同目录的 cmd-guard.rules.json 即生效。",
+
+  "_与本机版的唯一实质区别": [
+    "blockGui = false —— 客户机里 GUI 工具是正常手段（x64dbg GUI / PE-bear / ImHex 都是主力），不能拦。",
+    "timeout 兜底、卡死记账、ssh 有界化与本机版完全一致，一个没少。"
+  ],
+  "_为什么单独一份而不是改代码": "同一份 cmd-guard.ts 装在两台机器上，差别只在一个布尔。规则跟着机器走，代码不跟着机器走。",
+
+  "skillRoot": null,
+
+  "toolChainPaths": [],
+
+  "defaultTimeout": 120,
+  "_timeout说明": "客户机上工具更慢（VM 里尤其），探查档从 30s 抬到 60s。",
+  "probeTimeout": 60,
+  "analysisTimeout": 180,
+  "heavyTimeout": 900,
+  "scanTimeout": 240,
+
+  "stallSeconds": 300,
+  "noOutputStallSeconds": 120,
+
+  "enforce": true,
+  "_enforce说明": "仍然保持 true —— 拦截已经关了，但 timeout 注入是这版唯一还在物理生效的东西，关掉它这版就什么都不是了。",
+
+  "blockGui": false,
+  "_blockGui说明": "★ 客户机版的唯一实质差别。false = 不拦 GUI，只注入 timeout 兜底。",
+
+  "hardenSsh": true,
+
+  "_guiBinaries说明": "本机版基本不用填。真要拦某几个（怕它们吃掉交互式会话），在这里逐条写。值为 null 表示明确不拦。",
+  "guiBinaries": {},
+
+  "_allow说明": "救急用。",
+  "allow": ["cmd-guard-skip"]
+}

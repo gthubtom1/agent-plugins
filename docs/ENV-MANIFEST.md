@@ -70,14 +70,27 @@ npm 依赖树落在 `~/.pi/agent/npm/`（`package.json` + `package-lock.json` �
 
 | 插件 | 作用 | 交互 | 本机落盘 | 状态 |
 |---|---|---|---|---|
+| `cmd-guard` | 自动补 bash timeout / 物理拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | `~/.pi/agent/extensions/cmd-guard.ts`、`cmd-guard.rules.json` | 🟢 生产（哈希与仓库一致） |
 | `retry-level` | 重试档位 off/3/5/15/30/无限，状态栏常显 | `/retry [cycle\|status\|N]` | `~/.pi/agent/extensions/retry-level.ts` | 🟢 生产（哈希与仓库一致） |
 | `pi-prompt-compat` | 人格 (PERSONALITY.md) 与全局粘性规则 (RULES.md) 提示词兼容层 | 斜杠命令 `/rules-status` `/rules-reload` | `~/.pi/agent/extensions/prompt-compat.ts` | 🟢 生产（哈希与仓库一致） |
+| `smoke-cmd-guard.mjs` | cmd-guard 冒烟自测脚本（非扩展） | `node smoke-cmd-guard.mjs` | `~/.pi/agent/extensions/` | 🟡 测试件 |
 | `smoke-prompt-compat.mjs` | pi-prompt-compat 冒烟自测脚本（非扩展） | `bun smoke-prompt-compat.mjs` | `~/.pi/agent/extensions/` | 🟡 测试件 |
 
 安装（一条命令装完自制插件）：
 
 ```bash
 pi install git:github.com/gthubtom1/agent-plugins@main
+```
+
+仓库内另有 `plugins/pi/cmd-guard/cmd-guard.rules.vm.json`（VM 专用规则）——**本机未装**，只在 VM 内调试时手工拷。
+
+哈希基线（`manifest/extensions.sha256.json`，用于换机后对账）：
+
+```
+db2eacdf0bd927d7f0163e00c5ebe51b1702031aa2b0e6417631bdf7a4d30d64  cmd-guard.ts
+5fc62fc03bd98cc8359e2973409419df92578bf89574a410b824edfdbcc2df64  cmd-guard.rules.json
+e88dafbda5fe77b668e27215a99b7ee2b90d81f23f2382e86320cd5d5c445688  retry-level.ts
+91fa6f0037f2fcfe0078c52c1338947db0f2468c600e83541ee5649243fb8825  smoke-cmd-guard.mjs
 ```
 
 ---

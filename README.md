@@ -10,6 +10,7 @@
 
 | 智能体分类 | 插件名称 | 说明 | 交互能力 | 状态 | 快速直达 |
 |---|---|---|---|---|---|
+| **Pi Agent** | `cmd-guard` | **命令执行守卫**：自动补 timeout / 物理拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看文档](plugins/pi/cmd-guard/README.md) |
 | **Pi Agent** | `retry-level` | **重试档位**：菜单切档 off/3/5/15/30/无限，状态栏常显 | `/retry [cycle\|status\|N]` | 🟢 生产就绪 | [查看文档](plugins/pi/retry-level/README.md) |
 | **Pi Agent** | `pi-prompt-compat` | **人格与粘性规则兼容层**：PERSONALITY.md + RULES.md 跨轮次常驻 | 斜杠命令 `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看文档](plugins/pi/pi-prompt-compat/README.md) |
 | **DSH** | `dsh-infinite-retry` | 仿 PI-Desktop 无限重试插件：遇网络波动/429限流持续重试直到成功 | 自带设置页 Switch 开关 | 🟢 生产就绪 | [查看文档](plugins/dsh/dsh-infinite-retry/README.md) |
@@ -77,6 +78,7 @@ agent-plugins/
     ├── dsh/                       # DeepSeek Harness 插件
     │   └── dsh-infinite-retry/    # 无限重试插件（带 UI 开关）
     ├── pi/                        # Pi Coding Agent 扩展
+    │   ├── cmd-guard/             # 命令执行守卫（清单推荐）
     │   ├── retry-level/           # 重试档位（清单推荐）
     │   └── pi-prompt-compat/      # 人格与粘性规则兼容层（清单推荐）
     ├── pi-desktop/                # PI-Desktop 插件
