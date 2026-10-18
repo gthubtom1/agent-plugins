@@ -1,0 +1,23 @@
+{
+  "name": "pi-prompt-compat",
+  "version": "1.0.0",
+  "description": "Pi Coding Agent 人格 (PERSONALITY.md) 与全局粘性规则 (RULES.md) 提示词兼容层扩展",
+  "main": "index.ts",
+  "scripts": {
+    "test": "bun test.mjs"
+  },
+  "keywords": [
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "personality",
+    "rules",
+    "always-apply",
+    "prompt"
+  ],
+  "author": "Toti",
+  "license": "MIT",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.0.0"
+  }
+}

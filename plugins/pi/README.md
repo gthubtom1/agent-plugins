@@ -63,6 +63,7 @@ for p in pi-plan-task @demigodmode/pi-web-agent @aaronkyriesenbach/pi-package-ma
 cp cmd-guard/cmd-guard.ts             ~/.pi/agent/extensions/
 cp cmd-guard/cmd-guard.rules.json     ~/.pi/agent/extensions/
 cp retry-level/retry-level.ts         ~/.pi/agent/extensions/
+cp -r pi-prompt-compat/*              ~/.pi/agent/extensions/omp-prompt-compat/
 # 重启 pi（扩展在启动时加载）
 ```
 
@@ -82,10 +83,6 @@ cp retry-level/retry-level.ts         ~/.pi/agent/extensions/
 | `pi-win-notify` | Windows 桌面通知 | `pi install npm:pi-win-notify` |
 | `@gotgenes/pi-subagents` | 子代理 | `pi install npm:@gotgenes/pi-subagents` |
 
-> 这些是**第三方公开发布**的包，随上游更新。本仓库只登记名字与安装命令，不放它们的源码。
-> **锁定版本**（换机要完全一致时用）：`5.0.7 / 1.14.0 / 0.5.0 / 0.3.11 / 0.35.0 / 5.0.0 / 0.5.0 / 1.0.15 / 22.0.0`，
-> 权威清单见 `manifest/pi-settings.json` 的 `packages` 与 `docs/ENV-MANIFEST.md §2`。
-
 ---
 
 ## 🔌 MCP / 技能 / 配置（在本仓库登记）
@@ -97,8 +94,6 @@ cp retry-level/retry-level.ts         ~/.pi/agent/extensions/
 | 技能 | 3（computer-use / orca-cli / orchestration） | `~/.agents/skills/` | `manifest/skills/` |
 | 配置模板 | settings / models / open-tui / keybindings / trust / web-search | `~/.pi/agent/` | `manifest/*.json` |
 
-> 密钥（`auth.json`、provider apiKey、x64dbg Bearer token）不入库，只留 `${...}` 占位符。
-
 ---
 
 ## 🔧 自制插件清单（本仓库保存源码）
@@ -107,6 +102,7 @@ cp retry-level/retry-level.ts         ~/.pi/agent/extensions/
 |---|---|---|---|---|
 | `cmd-guard` | **命令执行守卫**：自动补 timeout / 物理拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看](cmd-guard/README.md) |
 | `retry-level` | **重试档位**：菜单切档（off/3/5/10/15/30/无限），状态栏常显，无限档可 Esc 中断 | `/retry` `/retry cycle` `/retry status` | 🟢 生产就绪 | [查看](retry-level/README.md) |
+| `pi-prompt-compat` | **人格与粘性规则兼容层**：OMP 风格 PERSONALITY.md + RULES.md 跨轮次常驻 | 斜杠命令 `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看](pi-prompt-compat/README.md) |
 | `pi-infinite-retry` | 老版无限重试（简版）：开关式，无档位菜单 | `/retry on\|off\|status\|<num>` | 🟡 被 `retry-level` 取代 | [查看](pi-infinite-retry/README.md) |
 
 > ⚠️ **`retry-level` 与 `pi-infinite-retry` 都注册 `/retry`，不要同时启用**。
@@ -129,17 +125,3 @@ cp retry-level/retry-level.ts         ~/.pi/agent/extensions/
    - 目录内必须含：入口文件、`README.md`、`package.json`、`LICENSE`
    - 新增后**记得往仓库根 `package.json` 的 `pi.extensions` 里加一行**（否则 `pi install` 装不到它）
    - `README.md` 要写：为什么需要它 / 它做什么 / 怎么装 / 踩过的坑
-
----
-
-## 🗂 其他宿主的插件
-
-| 宿主 | 目录 |
-|---|---|
-| Claude Code | `plugins/claude-code/` |
-| Codex | `plugins/codex/` |
-| DeepSeek Harness (dsh) | `plugins/dsh/` |
-| OpenCode | `plugins/opencode/` |
-| PI-Desktop | `plugins/pi-desktop/` |
-
-各宿主的加载方式不同，见对应目录下的 `README.md`。
