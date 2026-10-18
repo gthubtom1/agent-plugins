@@ -10,10 +10,8 @@
 
 | 智能体分类 | 插件名称 | 说明 | 交互能力 | 状态 | 快速直达 |
 |---|---|---|---|---|---|
-| **Pi Agent** | `cmd-guard` | **命令执行守卫**：自动补 timeout / 物理拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看文档](plugins/pi/cmd-guard/README.md) |
 | **Pi Agent** | `retry-level` | **重试档位**：菜单切档 off/3/5/15/30/无限，状态栏常显 | `/retry [cycle\|status\|N]` | 🟢 生产就绪 | [查看文档](plugins/pi/retry-level/README.md) |
-| **Pi Agent** | `pi-prompt-compat` | **人格与粘性规则兼容层**：OMP 风格 PERSONALITY.md + RULES.md 跨轮次常驻 | 斜杠命令 `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看文档](plugins/pi/pi-prompt-compat/README.md) |
-| **Pi Agent** | `pi-infinite-retry` | Pi Coding Agent 早期简版无限重试扩展（已被 `retry-level` 取代，保留参考） | 斜杠命令 `/retry` | 🟡 已被取代 | [查看文档](plugins/pi/pi-infinite-retry/README.md) |
+| **Pi Agent** | `pi-prompt-compat` | **人格与粘性规则兼容层**：PERSONALITY.md + RULES.md 跨轮次常驻 | 斜杠命令 `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看文档](plugins/pi/pi-prompt-compat/README.md) |
 | **DSH** | `dsh-infinite-retry` | 仿 PI-Desktop 无限重试插件：遇网络波动/429限流持续重试直到成功 | 自带设置页 Switch 开关 | 🟢 生产就绪 | [查看文档](plugins/dsh/dsh-infinite-retry/README.md) |
 | **PI-Desktop** | *(规划中)* | 面向 PI-Desktop 的原生 `.piplug` 扩展 | Work Panel / Sidecar | 🟡 建设中 | [分类主页](plugins/pi-desktop/README.md) |
 | **Claude Code** | *(规划中)* | 面向 Claude Code 的 MCP 工具与 Hook 增强 | 终端 CLI / Tools | 🟡 建设中 | [分类主页](plugins/claude-code/README.md) |
@@ -79,10 +77,8 @@ agent-plugins/
     ├── dsh/                       # DeepSeek Harness 插件
     │   └── dsh-infinite-retry/    # 无限重试插件（带 UI 开关）
     ├── pi/                        # Pi Coding Agent 扩展
-    │   ├── cmd-guard/             # 命令执行守卫（清单推荐）
     │   ├── retry-level/           # 重试档位（清单推荐）
-    │   ├── pi-prompt-compat/      # 人格与粘性规则兼容层（清单推荐）
-    │   └── pi-infinite-retry/     # 早期简版（保留参考，不进安装清单）
+    │   └── pi-prompt-compat/      # 人格与粘性规则兼容层（清单推荐）
     ├── pi-desktop/                # PI-Desktop 插件
     ├── claude-code/               # Claude Code 扩展
     ├── codex/                     # Codex 扩展
@@ -101,10 +97,10 @@ agent-plugins/
 
 ```powershell
 # 1) 本机自测 —— 插件目录里都有 smoke 测试
-bun plugins\pi\pi-prompt-compat\test.mjs
+bun plugins\pi\pi-prompt-compat\smoke-prompt-compat.mjs
 
 # 2) 把新版本复制到本机 pi 家目录
-Copy-Item -Recurse plugins\pi\pi-prompt-compat\* "$HOME\.pi\agent\extensions\omp-prompt-compat\" -Force
+copy plugins\pi\pi-prompt-compat\prompt-compat.ts "$env:USERPROFILE\.pi\agent\extensions\" -Force
 
 # 3) 重算基线并当场对账（一条命令同时做两件事）
 powershell -ExecutionPolicy Bypass -File scripts\regen-extension-baseline.ps1 -PiHome $env:USERPROFILE\.pi\agent

@@ -60,10 +60,8 @@ for p in pi-plan-task @demigodmode/pi-web-agent @aaronkyriesenbach/pi-package-ma
 
 ```bash
 # 把仓库克隆下来，挑要用的插件目录，把里面的 .ts 拷进 pi 的扩展目录
-cp cmd-guard/cmd-guard.ts             ~/.pi/agent/extensions/
-cp cmd-guard/cmd-guard.rules.json     ~/.pi/agent/extensions/
 cp retry-level/retry-level.ts         ~/.pi/agent/extensions/
-cp -r pi-prompt-compat/*              ~/.pi/agent/extensions/omp-prompt-compat/
+cp pi-prompt-compat/prompt-compat.ts   ~/.pi/agent/extensions/
 # 重启 pi（扩展在启动时加载）
 ```
 
@@ -100,14 +98,8 @@ cp -r pi-prompt-compat/*              ~/.pi/agent/extensions/omp-prompt-compat/
 
 | 插件 | 说明 | 交互形式 | 状态 | 文档 |
 |---|---|---|---|---|
-| `cmd-guard` | **命令执行守卫**：自动补 timeout / 物理拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看](cmd-guard/README.md) |
 | `retry-level` | **重试档位**：菜单切档（off/3/5/10/15/30/无限），状态栏常显，无限档可 Esc 中断 | `/retry` `/retry cycle` `/retry status` | 🟢 生产就绪 | [查看](retry-level/README.md) |
-| `pi-prompt-compat` | **人格与粘性规则兼容层**：OMP 风格 PERSONALITY.md + RULES.md 跨轮次常驻 | 斜杠命令 `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看](pi-prompt-compat/README.md) |
-| `pi-infinite-retry` | 老版无限重试（简版）：开关式，无档位菜单 | `/retry on\|off\|status\|<num>` | 🟡 被 `retry-level` 取代 | [查看](pi-infinite-retry/README.md) |
-
-> ⚠️ **`retry-level` 与 `pi-infinite-retry` 都注册 `/retry`，不要同时启用**。
-> 新装机器建议只用 `retry-level`（功能更全）。`pi-infinite-retry` 的源码保留作参考，
-> 不在根 `package.json` 的自动安装清单里。
+| `pi-prompt-compat` | **人格与粘性规则兼容层**：PERSONALITY.md + RULES.md 跨轮次常驻 | 斜杠命令 `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看](pi-prompt-compat/README.md) |
 
 ---
 

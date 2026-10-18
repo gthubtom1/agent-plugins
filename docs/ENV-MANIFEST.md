@@ -70,28 +70,14 @@ npm 依赖树落在 `~/.pi/agent/npm/`（`package.json` + `package-lock.json` �
 
 | 插件 | 作用 | 交互 | 本机落盘 | 状态 |
 |---|---|---|---|---|
-| `cmd-guard` | 自动补 bash timeout / 物理拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | `~/.pi/agent/extensions/cmd-guard.ts`、`cmd-guard.rules.json` | 🟢 生产（哈希与仓库一致） |
 | `retry-level` | 重试档位 off/3/5/15/30/无限，状态栏常显 | `/retry [cycle\|status\|N]` | `~/.pi/agent/extensions/retry-level.ts` | 🟢 生产（哈希与仓库一致） |
 | `pi-prompt-compat` | 人格 (PERSONALITY.md) 与全局粘性规则 (RULES.md) 提示词兼容层 | 斜杠命令 `/rules-status` `/rules-reload` | `~/.pi/agent/extensions/prompt-compat.ts` | 🟢 生产（哈希与仓库一致） |
-| `pi-infinite-retry` | 早期简版无限重试，与 `retry-level` 都注册 `/retry` | `/retry on\|off` | 未安装 | 🟡 保留参考，**不要同时启用** |
-| `smoke-cmd-guard.mjs` | cmd-guard 冒烟自测脚本（非扩展） | `node smoke-cmd-guard.mjs` | `~/.pi/agent/extensions/` | 🟡 测试件 |
 | `smoke-prompt-compat.mjs` | pi-prompt-compat 冒烟自测脚本（非扩展） | `bun smoke-prompt-compat.mjs` | `~/.pi/agent/extensions/` | 🟡 测试件 |
 
 安装（一条命令装完自制插件）：
 
 ```bash
 pi install git:github.com/gthubtom1/agent-plugins@main
-```
-
-仓库内另有 `plugins/pi/cmd-guard/cmd-guard.rules.vm.json`（VM 专用规则）——**本机未装**，只在 VM 内调试时手工拷。
-
-哈希基线（`manifest/extensions.sha256.json`，用于换机后对账）：
-
-```
-279896b34e455cfa447f6bd64ff8cbaafdfc8d105151a197e7b230f52e3209f0  cmd-guard.ts
-21f95eae296961bf6444f911395d77695dec5b928237a43a64b561e5291489a0  cmd-guard.rules.json
-e88dafbda5fe77b668e27215a99b7ee2b90d81f23f2382e86320cd5d5c445688  retry-level.ts
-95d3e6f0c69d97f959946832b6268c85a8465a8bb78fb474687a8d420f863f02  smoke-cmd-guard.mjs
 ```
 
 ---
