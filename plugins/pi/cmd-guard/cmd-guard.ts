@@ -61,6 +61,8 @@ interface GuardConfig {
 	enforce: boolean;
 	/** false = 不拦 GUI，只注入 timeout 兜底。客户机 / VM 上 GUI 是正当手段，用这个 */
 	blockGui: boolean;
+	/** true = 物理拦下「盘根递归扫描」（find / · dir /s C:\）。这类命令几乎必然超时且无产出 */
+	blockRootScan: boolean;
 	/** 给 ssh/scp 补 ConnectTimeout */
 	hardenSsh: boolean;
 	/** 手写 GUI 名单（覆盖同名派生项）。值可以是提示语，null / "" 表示「明确不拦」 */
@@ -85,6 +87,7 @@ const DEFAULTS: GuardConfig = {
 	noOutputStallSeconds: 90,
 	enforce: true,
 	blockGui: true,
+	blockRootScan: true,
 	hardenSsh: true,
 	guiBinaries: {},
 	allow: ["cmd-guard-skip"],
@@ -411,6 +414,21 @@ const PROBE = [
 ];
 const RECURSIVE_SCAN =
 	/\b(find|rg|grep|Get-ChildItem|gci)\b[^\n]*(\s-r\b|-Recurse|[A-Za-z]:[\\/](HACKER|Project|Users|Windows|node_modules|EXE|Tools|\.git)\b|\/(usr|var|opt|home)\b)/i;
+/**
+ * POSIX 根扫描：`find /` · `grep -r /` · `du -sh /`。
+ * ★ v2.1.0 新增：`find /` 不带盘符，旧的两条正则都漏判 ——
+ *   实测事故：agent 发出 `find / -maxdepth 8 -type d -name x`，未命中任何规则，
+ *   只拿到默认 120s，仍在盘根扫了几分钟。
+ */
+const POSIX_ROOT_SCAN = /\b(find|rg|grep|du|tree)\b[^\n]*?(?:^|\s)\/(?=\s|$)/i;
+
+/** 命中盘根递归扫描则返回该命令片段，否则 null。 */
+function detectRootScan(cmd: string): string | null {
+	if (POSIX_ROOT_SCAN.test(cmd)) return cmd.trim();
+	if (DRIVE_ROOT_SCAN.test(cmd)) return cmd.trim();
+	return null;
+}
+
 const DRIVE_ROOT_SCAN =
 	// 只认「命令词 + 路径正好停在盘符根」。旧版两处写法都有问题：
 	//   顶层 `|` 让第二个分支脱离命令词 → 任何带 C:\ 的命令都被当成全盘扫描；
@@ -612,6 +630,25 @@ export default function cmdGuard(pi: any): void {
 					return { block: true, reason };
 				}
 				notes.push(`\`${hit[0]}\` 在 GUI 名单里但 enforce=false，本次未拦。`);
+			}
+		}
+
+		/* 1.5 盘根递归扫描 —— 拦下而不是只抬 timeout：抬到 180s 仍是 3 分钟空转 */
+		if (config.blockRootScan) {
+			const rootHit = detectRootScan(cmd);
+			if (rootHit) {
+				const reason =
+					`[cmd-guard] 已拦下盘根递归扫描：\`${head(rootHit, 80)}\`。\n` +
+					`这类命令会扫满整盘、几十秒到几分钟不返回；命令阻塞期间模型不在运行，物理上无法自愈。\n` +
+					`改用：已知路径常量（项目内 TOOL_DIR / 配置里的绝对路径）→ \`where.exe <id>\` / \`Get-Command <id>\` → 工具发现器。\n` +
+					`确实要扫：把范围缩到具体目录（\`find <dir> -maxdepth N\`），或加 \`cmd-guard-skip\` 临时放行并显式传 timeout。`;
+				blocked.push({ at: new Date().toISOString().slice(11, 19), cmd: head(cmd, 100), reason: head(reason, 100) });
+				stats.blocked++;
+				if (config.enforce) {
+					ctx?.ui?.notify?.("cmd-guard 拦下盘根递归扫描：改用具体目录或工具发现器", "warning");
+					return { block: true, reason };
+				}
+				notes.push("盘根递归扫描：blockRootScan=true 但 enforce=false，本次未拦。");
 			}
 		}
 

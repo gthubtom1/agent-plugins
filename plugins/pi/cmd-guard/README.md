@@ -30,7 +30,7 @@ timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional,
 | **GUI 二进制经管道启动** | 弹窗等输入、零 stdout、进程永不退出 | 如 `die.exe`（DIE GUI 版），应改用 `diec` | 物理拦下，给出 CLI 替代 |
 | **VMware 快照类操作** | `vmrun snapshot` 对运行中客户机写快照，锁争用时无限期挂起 | VIX 同步调用 | 后台跑 + 轮询产物的提示回灌 |
 | **交互式命令无 stdin** | `ssh` 弹 `Are you sure / password` | 缺 `</dev/null`、缺 `ConnectTimeout` | 自动补 |
-| **递归扫描大目录** | `find "C:/" ...` 无输出但一直在跑 | 无界耗时 | 抬 timeout 到 ≥180s |
+| **递归扫描大目录** | `find "C:/" ...` 无输出但一直在跑 | 无界耗时 | 抬 timeout 到 ≥180s；**盘根递归（`find /` / `dir /s C:\`）直接拦下**并给替代路径 |
 
 ---
 

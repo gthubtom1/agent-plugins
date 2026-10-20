@@ -133,6 +133,22 @@ check("链式命令的后半段仍会被拦", () => {
   assert.ok(out && out.block === true, "链后半段漏拦");
 });
 
+check("find / 盘根递归被拦（v2.1.0 新增）", () => {
+  const { out } = call("find / -maxdepth 8 -type d -name reverselab 2>/dev/null");
+  assert.ok(out && out.block === true, "find / 没被拦");
+  assert.match(out.reason, /盘根递归/);
+});
+
+check("dir /s C:\\ 盘根递归被拦", () => {
+  const { out } = call("dir /s C:\\", "powershell");
+  assert.ok(out && out.block === true, "dir /s C:\\ 没被拦");
+});
+
+check("ls / 不误拦（非递归）", () => {
+  const { out } = call("ls /");
+  assert.ok(!out || out.block !== true, "ls / 被误拦");
+});
+
 check("cmd-guard-skip 整条放行", () => {
   const { out } = call("cmd-guard-skip die.exe sample.exe");
   assert.ok(!out, "豁免没生效");
@@ -165,8 +181,13 @@ check("递归大目录抬到 180s", () => {
   assert.strictEqual(event.input.timeout, 180);
 });
 
-check("盘符根扫描抬到 180s", () => {
-  const { event } = call("rg foo C:\\");
+check("盘根扫描改为拦截（v2.1.0 语义变更）", () => {
+  const { out } = call("rg foo C:\\");
+  assert.ok(out && out.block === true, "盘根扫描应被拦下，而不是只抬 timeout");
+});
+
+check("非盘根的递归扫描仍抬到 180s", () => {
+  const { event } = call("rg foo C:\\Tools");
   assert.strictEqual(event.input.timeout, 180);
 });
 
