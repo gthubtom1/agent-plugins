@@ -1,6 +1,6 @@
 {
   "name": "pi-cmd-guard",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Pi Coding Agent 命令执行守卫：自动补 timeout、物理拦截 GUI 二进制、ssh 有界化、卡死状态栏",
   "main": "cmd-guard.ts",
   "scripts": {
