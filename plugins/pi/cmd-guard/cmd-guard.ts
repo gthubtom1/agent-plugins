@@ -577,7 +577,8 @@ export default function cmdGuard(pi: any): void {
 			` · GUI 拦截 ${active} 条 · 规则来源 ${rulesSource}` +
 			` · 卡死阈值 ${config.stallSeconds}s · 静默阈值 ${config.noOutputStallSeconds}s` +
 			`${config.enforce ? "" : " · ★enforce=false，只记账不阻断"}` +
-			`${config.blockGui ? "" : " · ★blockGui=false，不拦 GUI"}`,
+			`${config.blockGui ? "" : " · ★blockGui=false，不拦 GUI"}` +
+			`${config.blockRootScan ? " · 盘根扫描=拦截" : " · ★blockRootScan=false，盘根扫描只抬 timeout"}`,
 	);
 
 	// ── 上下文捕获：ExtensionAPI 没有 ui，ui 在 handler 的第二个参数上 ──
