@@ -14,9 +14,9 @@
 |---|---|---|---|
 | pi 本体 | 1 | npm `@earendil-works/pi-coding-agent@1.0.0` | 否（记录安装命令） |
 | pi 第三方 npm 包 | 9 | npm 公网 | 否（仅登记地址+版本） |
-| pi 自制扩展 | 2（+1 遗留 +1 冒烟测试） | 本仓库源码 | ✅ `plugins/pi/*` |
+| pi 自制扩展 | cmd-guard / retry-level / pi-prompt-compat（单文件）+ pi-seep-ext（包：人设/回退/远程） | 本仓库源码 | ✅ `plugins/pi/*` |
 | Orca 托管扩展 | 3 | Orca 桌面端注入 | 否（记录来源与哈希） |
-| MCP server | 10（pi 侧）+ 4（Orca 侧） | npx / 本地 exe / HTTP | 否（登记地址+脱敏模板） |
+| MCP server | 10（pi 侧）+ 4（Orca 侧） | npx / 本地 exe / HTTP | ❌ **不入库**：地址、端口、可执行文件路径都是本机的，换机用 `pi mcp add` 重建 |
 | 技能 skill | 3 | Orca 内置技能集 | ✅ 备份在 `manifest/skills/` |
 | 纪律卡 hubcore | 1 | 私有库 `gthubtom1/hubcore` | 否（登记地址+安装命令） |
 
@@ -45,21 +45,21 @@ npm i -g @earendil-works/pi-coding-agent@1.0.0    # 或 pi 自身的 managed ins
 | # | 包名 | 本机版本 | 作用 | 上游地址 | 安装命令 |
 |---|---|---|---|---|---|
 | 1 | `pi-plan-task` | 5.0.7 | 计划/任务（Plan-Task） | npm（无 repository 字段） | `pi install npm:pi-plan-task@5.0.7` |
-| 2 | `@demigodmode/pi-web-agent` | 1.14.0 | Web Agent 能力 | https://github.com/demigodmode/pi-web-agent | `pi install npm:@demigodmode/pi-web-agent@1.14.0` |
+| 2 | `@demigodmode/pi-web-agent` | 1.16.0 | Web Agent 能力 | https://github.com/demigodmode/pi-web-agent | `pi install npm:@demigodmode/pi-web-agent@1.16.0` |
 | 3 | `@aaronkyriesenbach/pi-package-manager` | 0.5.0 | 包管理器 UI | https://github.com/aaronkyriesenbach/pi-packages | `pi install npm:@aaronkyriesenbach/pi-package-manager@0.5.0` |
 | 4 | `pi-open-tui` | 0.3.11 | TUI 增强（本机 TUI 模式由它接管） | https://github.com/OldSuns/pi-open-tui | `pi install npm:pi-open-tui@0.3.11` |
-| 5 | `pi-web-access` | 0.35.0 | 联网访问 | https://github.com/nicobailon/pi-web-access | `pi install npm:pi-web-access@0.35.0` |
-| 6 | `pi-mcp-adapter` | 5.0.0 | MCP 适配层 | https://github.com/nicobailon/pi-mcp-adapter | `pi install npm:pi-mcp-adapter@5.0.0` |
+| 5 | `pi-web-access` | 0.44.0 | 联网访问 | https://github.com/nicobailon/pi-web-access | `pi install npm:pi-web-access@0.44.0` |
+| 6 | `pi-mcp-adapter` | 6.0.0 | MCP 适配层 | https://github.com/nicobailon/pi-mcp-adapter | `pi install npm:pi-mcp-adapter@6.0.0` |
 | 7 | `pi-tool-display` | 0.5.0 | 工具调用展示 | https://github.com/MasuRii/pi-tool-display | `pi install npm:pi-tool-display@0.5.0` |
 | 8 | `pi-win-notify` | 1.0.15 | Windows 桌面通知 | https://github.com/ryanchan720/pi-desktop-notify | `pi install npm:pi-win-notify@1.0.15` |
-| 9 | `@gotgenes/pi-subagents` | 22.0.0 | 子代理（本会话的 subagent 工具来源） | https://github.com/gotgenes/pi-packages | `pi install npm:@gotgenes/pi-subagents@22.0.0` |
+| 9 | `@gotgenes/pi-subagents` | 25.0.4 | 子代理（本会话的 subagent 工具来源） | https://github.com/gotgenes/pi-packages | `pi install npm:@gotgenes/pi-subagents@25.0.4` |
 
 一次性全装：
 
 ```bash
-for p in pi-plan-task@5.0.7 @demigodmode/pi-web-agent@1.14.0 @aaronkyriesenbach/pi-package-manager@0.5.0 \
-         pi-open-tui@0.3.11 pi-web-access@0.35.0 pi-mcp-adapter@5.0.0 pi-tool-display@0.5.0 \
-         pi-win-notify@1.0.15 @gotgenes/pi-subagents@22.0.0; do pi install "npm:$p"; done
+for p in pi-plan-task@5.1.0 @demigodmode/pi-web-agent@1.16.0 @aaronkyriesenbach/pi-package-manager@0.5.0 \
+         pi-open-tui@0.3.11 pi-web-access@0.44.0 pi-mcp-adapter@6.0.0 pi-tool-display@0.5.0 \
+         pi-win-notify@1.0.15 @gotgenes/pi-subagents@25.0.4; do pi install "npm:$p"; done
 ```
 
 npm 依赖树落在 `~/.pi/agent/npm/`（`package.json` + `package-lock.json` 已在仓内可复现）。
@@ -108,35 +108,26 @@ e88dafbda5fe77b668e27215a99b7ee2b90d81f23f2382e86320cd5d5c445688  retry-level.ts
 
 ---
 
-## 5. MCP server 清单（10 个，pi 侧）
+## 5. MCP server（**不入库**）
 
-配置文件：`~/.pi/agent/mcp.json`；脱敏模板：`manifest/mcp.json`（占位符 `${TOOL_ROOT}` = 逆向工具根、`${PY_ROOT}` = Python 根、`${X64DBG_MCP_TOKEN}`）。
+pi 侧 10 个、Orca 侧 4 个都**不放进本仓库**，`manifest/mcp.json` 与 `manifest/agent-servers.json` 已删除。
 
-| id | 传输 | 地址 / 命令 | 换机注意 |
-|---|---|---|---|
-| `jshook` | npx stdio | `npx -y @jshookmcp/jshook@0.3.4`（`JSHOOK_BASE_PROFILE=search`） | 纯 npm，无需配置 |
-| `reqable-mcp` | npx stdio | `npx -y reqable-mcp-server@1.0.1 --scope minimal` | 需本机装 Reqable 并开抓包 |
-| `playwright-mcp` | npx stdio | `npx -y @playwright/mcp@latest` | 首次用需 `npx playwright install` |
-| `chrome-devtools` | npx stdio | `npx -y chrome-devtools-mcp@latest` | 需本机 Chrome |
-| `xquik` | HTTP | `https://xquik.com/mcp` | 远端服务，直连 |
-| `idalib-mcp` | 本地 exe stdio | `${PY_ROOT}\python\Scripts\idalib-mcp.exe --stdio`，`IDADIR=${TOOL_ROOT}\IDA Professional 9.4` | 需 IDA Pro 9.4 + Python 包 `idalib-mcp`（本机 `PY_ROOT=D:\EXE`、`TOOL_ROOT=D:\HACKER`） |
-| `idapro` | HTTP | `http://127.0.0.1:13337/mcp` | 需 IDA GUI 打开并加载 ida-pro-mcp 插件 |
-| `x64dbg` | HTTP | `http://127.0.0.1:9094/` + `Bearer ${X64DBG_MCP_TOKEN}` | 需先启动 x64dbg；token 在 `release\x64\mcp_config.json` |
-| `x64dbg32` | HTTP | `http://127.0.0.1:9095/` + `Bearer ${X64DBG_MCP_TOKEN}` | x32 调试器（VM 逆向工作机-01） |
-| （内置）`mcp` | — | 本机 `settings.json` 里 `extensions: ["-builtin:mcp"]` 禁用了 pi 内置 MCP | — |
+原因只有一条：MCP 的定义里几乎没有可复用的东西——
 
-> ⚠️ 两个 `Authorization: Bearer …` 是**本机令牌**，仓库模板里只留占位符。仓库里出现的真实令牌已清零，泄露风险面为零。
+- 地址是 `127.0.0.1:<端口>`（IDA / x64dbg 的端口随机器和启动顺序变）；
+- 命令是绝对路径（`idalib-mcp.exe` 在 Python 根下）；
+- 令牌是每台机器自己的（x64dbg 的 Bearer）。
 
-### 5.1 Orca 侧 MCP server（4 个）
+把它当"环境快照"存进仓库，只会造成一种误导：以为换机后 MCP 会自己回来。
+真到新机器上，按需要现建一次更可靠：
 
-配置文件：`~/.agents/servers/*.json`；汇总模板：`manifest/agent-servers.json`。
+```bash
+pi mcp add <id> -- <命令> [参数...]      # stdio
+pi mcp add <id> --url http://127.0.0.1:<端口>/mcp   # http
+```
 
-| id | 命令 | 作用 |
-|---|---|---|
-| `context7` | `npx -y @upstash/context7-mcp` | 查最新框架文档 |
-| `everything` | `npx -y @modelcontextprotocol/server-everything` | MCP 能力自检 |
-| `playwright` | `npx -y @playwright/mcp@latest` | 浏览器无障碍树驱动 |
-| `sequential-thinking` | `npx -y @modelcontextprotocol/server-sequential-thinking` | 分步反思推理 |
+> `settings.json` 里的 `extensions: ["-builtin:mcp"]` 是**另一回事**，要保留：它禁用了 pi 内置 MCP，
+> 因为本机用 `pi-mcp-adapter` 接管。换机时这条设置跟着 `manifest/pi-settings.json` 一起恢复。
 
 ---
 
@@ -159,13 +150,12 @@ e88dafbda5fe77b668e27215a99b7ee2b90d81f23f2382e86320cd5d5c445688  retry-level.ts
 | 文件 | 位置 | 模板 | 说明 |
 |---|---|---|---|
 | `settings.json` | `~/.pi/agent/settings.json` | `manifest/pi-settings.json` | packages 列表、retry 策略、禁内置 mcp、TUI 全屏、信任策略、思考等级 |
-| `mcp.json` | `~/.pi/agent/mcp.json` | `manifest/mcp.json` | 10 个 MCP，token 占位 |
 | `models.json` | `~/.pi/agent/models.json` | `manifest/models.json` | newapi provider + 全部模型 id/上下文/思考档，key 占位 |
 | `auth.json` | `~/.pi/agent/auth.json` | ❌ 不入库 | 真实 API key，换机手填或 `pi` 重新登录 |
 | `open-tui.json` | `~/.pi/agent/open-tui.json` | `manifest/open-tui.json` | footer 段、图标 ascii、遥测全关 |
 | `web-search.json` | `~/.pi/agent/web-search.json` | `manifest/web-search.json` | workflow=none |
 | `keybindings.json` | `~/.pi/agent/keybindings.json` | `manifest/keybindings.json` | `alt+enter` 续发 |
-| `trust.json` | `~/.pi/agent/trust.json` | `manifest/trust.json` | 项目免信任白名单（换机改路径） |
+| `trust.json` | `~/.pi/agent/trust.json` | `manifest/trust.json` | 项目免信任白名单（**含本机绝对路径，换机后基本无效**，建议手工重建） |
 
 模型 provider：`newapi` → `https://newapi.totii.ccwu.cc/v1`（api=`openai-responses`），模型含 `claude-sonnet-4-6`、`deepseek-flash`、`deepseek-v4-pro`、`gemini-3.8-flash` 等，详见 `manifest/models.json`。
 
@@ -191,15 +181,14 @@ git clone https://github.com/gthubtom1/agent-plugins.git C:\Tools\agent-plugins
 cd C:\Tools\agent-plugins
 powershell -ExecutionPolicy Bypass -File scripts\restore-machine.ps1 `
     -ToolRoot 'D:\HACKER' `
-    -NewApiKey 'sk-…' `
-    -X64dbgToken '…'
+    -NewApiKey 'sk-…'
 ```
 
 脚本做四件事（幂等，可重复跑）：
 
 1. 装 pi 本体 + 9 个 npm 包 + `git:github.com/gthubtom1/agent-plugins@main`（自制扩展走 package 安装，不再手工拷 `.ts`）。
-2. 覆盖 `settings.json` / `mcp.json` / `models.json` / `open-tui.json` / `web-search.json` / `keybindings.json`（模板占位符用参数替换；已存在文件先备份为 `*.bak-<时间戳>`）。
-3. 恢复 `~/.agents/skills/`（仓内备份）与 `~/.agents/servers/`（若缺失）。
+2. 覆盖 `settings.json` / `models.json` / `open-tui.json` / `web-search.json` / `keybindings.json` / `trust.json`（模板占位符用参数替换；已存在文件先备份为 `*.bak-<时间戳>`）。
+3. 恢复 `~/.agents/skills/`（仓内备份）。MCP server 不再恢复：换机后用 `pi mcp add` 按需重建。
 4. 打印 `pi list` 与哈希对账结果。
 
 手工核对：`scripts/check-sync.ps1`（比对 `~/.pi/agent/extensions/*.ts` 与 `manifest/extensions.sha256.json`）。

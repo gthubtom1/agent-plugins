@@ -24,7 +24,7 @@
 
 ---
 
-## 🧾 整机环境清单（插件 / MCP / 技能 / 配置）
+## 🧾 整机环境清单（插件 / 技能 / 配置）
 
 本仓库不只收自制插件，还是 **Toti 本机 AI Agent 环境的可复现清单**：
 
@@ -32,13 +32,13 @@
 |---|---|---|
 | 第三方 pi 包（9 个，带锁定版本） | `manifest/pi-settings.json` · `docs/ENV-MANIFEST.md §2` | `pi install npm:<包>@<版本>` |
 | 自制 pi 扩展 | `plugins/pi/*`（含源码） | `pi install git:github.com/gthubtom1/agent-plugins@main` |
-| MCP server（pi 侧 10 个 + Orca 侧 4 个，带地址） | `manifest/mcp.json` · `manifest/agent-servers.json` | 复制到 `~/.pi/agent/mcp.json` / `~/.agents/servers/` |
+| MCP server | ❌ **不入库** | 地址/端口/可执行文件路径都是本机的；换机后用 `pi mcp add` 现建（理由见 `docs/ENV-MANIFEST.md §5`） |
 | 技能（3 个备份） | `manifest/skills/` | 恢复脚本拷回 `~/.agents/skills/` |
 | 配置脱敏模板（models/settings/open-tui/keybindings/trust/web-search） | `manifest/*.json` | 恢复脚本写入 `~/.pi/agent/` |
 | 扩展哈希基线 | `manifest/extensions.sha256.json` | `scripts/check-sync.ps1` 对账 |
 | 纪律卡 hubcore（私有库） | `docs/ENV-MANIFEST.md §8` | 见该节 |
 
-> 密钥（`auth.json`、provider apiKey、x64dbg Bearer）**一律不入库**：仓内只有 `${NEWAPI_API_KEY}` / `${X64DBG_MCP_TOKEN}` 占位符，
+> 密钥（`auth.json`、provider apiKey、MCP 令牌）**一律不入库**：仓内只有 `${NEWAPI_API_KEY}` 占位符，
 > `.gitignore` 也硬性忽略 `auth.json` / `manifest/local/`。
 
 **换机一条命令：**
@@ -61,11 +61,9 @@ agent-plugins/
 ├── docs/                          # 规范与设计架构
 │   ├── ARCHITECTURE.md            # 多智能体插件统一架构设计说明
 │   ├── CONTRIBUTING.md            # 新插件接入与提交流程
-│   └── ENV-MANIFEST.md            # 本机整机环境清单（插件/MCP/技能/配置 + 地址 + 恢复流程）
+│   └── ENV-MANIFEST.md            # 本机整机环境清单（插件/技能/配置 + 恢复流程）
 ├── manifest/                      # 本机环境脱敏模板与哈希基线（不含密钥）
 │   ├── pi-settings.json           # settings.json 模板（packages 锁定版本）
-│   ├── mcp.json                   # 10 个 MCP server（token 占位）
-│   ├── agent-servers.json         # Orca 侧 4 个 MCP server 定义
 │   ├── models.json                # provider + 模型表（apiKey 占位）
 │   ├── open-tui.json / web-search.json / keybindings.json / trust.json
 │   ├── extensions.sha256.json     # 扩展哈希基线（对账用）

@@ -70,16 +70,11 @@ function walk(where, node) {
 // 1) settings.json —— 无密钥，原样保留 packages / retry / 扩展策略
 w('manifest/pi-settings.json', rd(path.join(H, 'settings.json')))
 
-// 2) mcp.json —— bearer 令牌与本机盘符占位化
-const mcp = rd(path.join(H, 'mcp.json'))
-for (const [id, s] of Object.entries(mcp.mcpServers)) {
-  if (s.headers && s.headers.Authorization) s.headers.Authorization = '${X64DBG_MCP_TOKEN}'
-  if (typeof s.command === 'string') s.command = sub(s.command)
-  if (Array.isArray(s.args)) s.args = s.args.map(sub)
-  if (s.env) for (const k of Object.keys(s.env)) s.env[k] = sub(s.env[k])
-}
-walk('mcp.json', mcp)
-w('manifest/mcp.json', mcp)
+// 2) mcp.json —— 不入库。
+//    MCP server 的定义里是「本机端口 + 本机可执行文件路径 + 令牌」，换机后全都不适用；
+//    把它当成环境快照存下来只会让人以为换机后 MCP 会自己回来。需要时在目标机器上
+//    用 `pi mcp add` 重建，或在那边直接编辑 mcp.json。
+//    （Orca 侧的 ~/.agents/servers 同理，见第 5 条。）
 
 // 3) models.json —— apiKey 占位化
 const models = rd(path.join(H, 'models.json'))
@@ -91,11 +86,7 @@ for (const f of ['open-tui.json', 'web-search.json', 'keybindings.json', 'trust.
   w('manifest/' + f, rd(path.join(H, f)))
 }
 
-// 5) .agents/servers —— Orca 侧 MCP server 定义
-const serversDir = path.join(A, 'servers')
-const servers = fs.readdirSync(serversDir).map((f) => rd(path.join(serversDir, f)))
-walk('agent-servers.json', servers)
-w('manifest/agent-servers.json', servers)
+// 5) .agents/servers —— 不入库（同上：本机地址/端口，换机无意义）
 
 console.log(`manifest written: ${fs.readdirSync('manifest').join(', ')}`)
 console.log(`  家目录 ${H}`)
