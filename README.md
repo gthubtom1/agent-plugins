@@ -12,7 +12,7 @@
 | 宿主 | 插件 | 说明 | 交互 | 状态 | 文档 |
 |---|---|---|---|---|---|
 | **Pi** | `pi-seep-ext · persona` | **按对话的人设**：人设 = `personas/*.md`（文件名即名字），随时切换/关闭，`cached`（省 token）/ `every-turn` 两种注入；切「无人设」真的删掉系统提示词里的身份 | 状态栏按钮 + `/persona` | 🟢 生产就绪 | [查看](plugins/pi/pi-seep-ext/README.md) |
-| **Pi** | `pi-seep-ext · rewind` | **回退**：回到某条消息之前 / 只删最后一条回复，原文放回输入框（官方 `navigateTree`，不碰会话文件） | `/rewind` `/undo-reply` | 🟢 生产就绪 | [查看](plugins/pi/pi-seep-ext/README.md) |
+| **Pi** | `pi-seep-ext · rewind` | **回退**：回到某条消息之前 / 只删最后一条回复，原文放回输入框（官方 `navigateTree`，不碰会话文件）；**状态栏「⟲ 回退」点一下就退** | 状态栏按钮 + `/rewind` `/undo-reply` | 🟢 生产就绪 | [查看](plugins/pi/pi-seep-ext/README.md) |
 | **Pi** | `pi-seep-ext · remote` | **手机连上**：局域网/Tailscale 地址、终端二维码、运行期生成密码、5 行自检；不改 pi-web | `/remote` | 🟢 生产就绪 | [查看](plugins/pi/pi-seep-ext/README.md) |
 | **Pi** | `cmd-guard` | **命令执行守卫**：自动补 timeout / 拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看](plugins/pi/cmd-guard/README.md) |
 | **Pi** | `retry-level` | **重试档位**：菜单切档 off/3/5/10/15/30/无限，状态栏常显且可点 | `/retry` | 🟢 生产就绪 | [查看](plugins/pi/retry-level/README.md) |

@@ -324,7 +324,21 @@ test("/undo-reply drops the last reply when the turn is plain text", async () =>
   assert.equal(ctx.hints.editorText, "问一下");
 });
 
-test("/undo-reply refuses a turn with tool work and points at /rewind", async () => {
+test("the status bar gets a one-click 回退 cell", () => {
+  // pi-web paints a `command:` status key as a button that sends that slash
+  // command, so the cell is the whole UI: no extra API, no patch.
+  const { api, handlers } = fakePi();
+  rewindExtension(api);
+
+  const ctx = fakeContext({ branch: [] });
+  for (const handler of handlers.get("session_start") ?? []) handler({}, ctx);
+
+  const cell = ctx.statuses.at(-1);
+  assert.equal(cell.key, "command:/undo-reply");
+  assert.match(cell.text, /回退/);
+});
+
+test("/undo-reply never drops a turn with tool work without confirmation", async () => {
   const { api, commands } = fakePi();
   rewindExtension(api);
 
@@ -333,12 +347,28 @@ test("/undo-reply refuses a turn with tool work and points at /rewind", async ()
     { type: "message", id: "t1", message: { role: "toolResult", content: [{ type: "text", text: "ok" }] } },
     { type: "message", id: "a1", message: { role: "assistant", content: [{ type: "text", text: "好了" }] } },
   ];
+  // No answer from the picker: the one-click path must not guess.
   const ctx = fakeContext({ branch });
   await commands.get("undo-reply").handler("", ctx);
 
   assert.deepEqual(ctx.navigations, []);
-  assert.match(ctx.notes.at(-1).message, /rewind/);
-  assert.equal(ctx.notes.at(-1).type, "warning");
+  assert.match(ctx.notes.at(-1).message, /列表/);
+});
+
+test("/undo-reply hands a tool-work turn over to the picker, confirmation included", async () => {
+  const { api, commands } = fakePi();
+  rewindExtension(api);
+
+  const branch = [
+    { type: "message", id: "u1", message: { role: "user", content: "跑个命令" } },
+    { type: "message", id: "t1", message: { role: "toolResult", content: [{ type: "text", text: "ok" }] } },
+    { type: "message", id: "a1", message: { role: "assistant", content: [{ type: "text", text: "好了" }] } },
+  ];
+  const ctx = fakeContext({ branch, select: ["1. 跑个命令  [tools]"] });
+  await commands.get("undo-reply").handler("", ctx);
+
+  assert.deepEqual(ctx.navigations, ["u1"]);
+  assert.equal(ctx.ui.getEditorText(), "跑个命令");
 });
 
 test("a conversation that used the fork's persona has its stale section cleaned up too", () => {

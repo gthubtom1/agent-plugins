@@ -1,6 +1,6 @@
 {
   "name": "pi-seep-ext",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "per-conversation personas, turn rewind, and phone access (QR/URL) for the pi coding agent",
   "license": "MIT",
   "repository": {
