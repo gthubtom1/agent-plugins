@@ -13,6 +13,9 @@
 | **Pi Agent** | `cmd-guard` | **命令执行守卫**：自动补 timeout / 物理拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看文档](plugins/pi/cmd-guard/README.md) |
 | **Pi Agent** | `retry-level` | **重试档位**：菜单切档 off/3/5/15/30/无限，状态栏常显 | `/retry [cycle\|status\|N]` | 🟢 生产就绪 | [查看文档](plugins/pi/retry-level/README.md) |
 | **Pi Agent** | `pi-prompt-compat` | **人格与粘性规则兼容层**：PERSONALITY.md + RULES.md 跨轮次常驻 | 斜杠命令 `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看文档](plugins/pi/pi-prompt-compat/README.md) |
+| **Pi Agent** | `pi-seep-ext · persona` | **按对话的人设**：人设就是目录里的 md 文件，随时切换/关闭，注入模式可选（cached 省 token） | 状态栏按钮 + `/persona` | 🟢 生产就绪 | [查看文档](plugins/pi/pi-seep-ext/README.md) |
+| **Pi Agent** | `pi-seep-ext · rewind` | **回退**：回到某条消息之前 / 只删最后一条回复，原文放回输入框（官方 `navigateTree`，不碰会话文件） | `/rewind` `/undo-reply` | 🟢 生产就绪 | [查看文档](plugins/pi/pi-seep-ext/README.md) |
+| **Pi Agent** | `pi-seep-ext · remote` | **手机连上**：局域网/Tailscale 地址、终端二维码、运行期生成密码、自检；不改 pi-web | `/remote` | 🟢 生产就绪 | [查看文档](plugins/pi/pi-seep-ext/README.md) |
 | **DSH** | `dsh-infinite-retry` | 仿 PI-Desktop 无限重试插件：遇网络波动/429限流持续重试直到成功 | 自带设置页 Switch 开关 | 🟢 生产就绪 | [查看文档](plugins/dsh/dsh-infinite-retry/README.md) |
 | **PI-Desktop** | *(规划中)* | 面向 PI-Desktop 的原生 `.piplug` 扩展 | Work Panel / Sidecar | 🟡 建设中 | [分类主页](plugins/pi-desktop/README.md) |
 | **Claude Code** | *(规划中)* | 面向 Claude Code 的 MCP 工具与 Hook 增强 | 终端 CLI / Tools | 🟡 建设中 | [分类主页](plugins/claude-code/README.md) |

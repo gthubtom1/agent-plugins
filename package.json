@@ -13,7 +13,10 @@
     "extensions": [
       "./plugins/pi/cmd-guard/cmd-guard.ts",
       "./plugins/pi/retry-level/retry-level.ts",
-      "./plugins/pi/pi-prompt-compat/prompt-compat.ts"
+      "./plugins/pi/pi-prompt-compat/prompt-compat.ts",
+      "./plugins/pi/pi-seep-ext/extensions/persona.ts",
+      "./plugins/pi/pi-seep-ext/extensions/rewind.ts",
+      "./plugins/pi/pi-seep-ext/extensions/remote.ts"
     ]
   },
   "repository": {

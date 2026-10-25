@@ -1,0 +1,27 @@
+{
+  "name": "pi-seep-ext",
+  "version": "0.3.0",
+  "description": "per-conversation personas, turn rewind, and phone access (QR/URL) for the pi coding agent",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gthubtom1/agent-plugins.git",
+    "directory": "plugins/pi/pi-seep-ext"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/persona.ts",
+      "./extensions/rewind.ts",
+      "./extensions/remote.ts"
+    ]
+  },
+  "optionalDependencies": {
+    "qrcode-generator": "^2.0.4"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test \"test/*.test.mjs\""
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

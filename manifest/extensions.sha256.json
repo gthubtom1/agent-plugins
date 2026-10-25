@@ -1,13 +1,13 @@
 {
   "generated_from": "plugins/**  (仓库源文件，不是本机安装的那份)",
-  "regenerate_with": "scripts/regen-extension-baseline.ps1",
+  "regenerate_with": "scripts/regen-extension-baseline.ps1 或 scripts/regen-baseline.mjs",
   "files": {
-    "cmd-guard.rules.json": "0b0a60cbbfa05cf0f7fe413e5bd2a735140767d528e2e7d1e4bc96d124102b69",
-    "cmd-guard.ts": "9415388e679e58aff4dc9ad5b54358d3e18a3b7c9cda05ca1ba7a371804764f0",
+    "cmd-guard.rules.json": "a2fa124704759b00a74fb7f62d77970344cb6140d0f32c855c988e5adeb2fa9b",
+    "cmd-guard.ts": "4caa388da4243779bade61c835088be7498315eb0961f298cdb32965217ba9ff",
     "smoke-cmd-guard.mjs": "9d80b2e224a185463eda20fb2df0a9e0a85ee9bf12f528d61ff43f311169a694",
     "prompt-compat.ts": "65610fd841b8c353031facfc300ede2f62cb819467ae095c8da3214adfcffdbc",
     "smoke-prompt-compat.mjs": "8067ed191c688f59301187456d1d2b97b4229d0e43f751a8ad17290702e4d082",
-    "retry-level.ts": "e88dafbda5fe77b668e27215a99b7ee2b90d81f23f2382e86320cd5d5c445688"
+    "retry-level.ts": "3c2607361ca50fa578ac12807dd69adafde5603ddb981b98b3218924c9afad4c"
   },
   "repo_sources": {
     "cmd-guard.rules.json": "plugins/pi/cmd-guard/cmd-guard.rules.json",

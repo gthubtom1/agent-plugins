@@ -41,6 +41,20 @@ foreach ($h in $hostDirs) {
       Write-Host "  [skip] $($h.Name)/$($dir.Name) —— 已标记 RETIRED" -ForegroundColor DarkGray
       continue
     }
+    # 包形式插件（package.json 里有 pi.extensions）：源码是多文件、可能还带依赖，
+    # 由 `pi install` 整体安装，不属于"单个文件拷进 extensions/"的基线范围。
+    $pkgJson = Join-Path $dir.FullName 'package.json'
+    if (Test-Path $pkgJson) {
+      try {
+        $pkg = Get-Content $pkgJson -Raw | ConvertFrom-Json
+        if ($pkg.pi -and $pkg.pi.extensions) {
+          Write-Host "  [skip] $($h.Name)/$($dir.Name) —— 包形式（pi install 安装，不拷单文件）" -ForegroundColor DarkGray
+          continue
+        }
+      } catch {
+        # 坏掉的 package.json 不阻断基线生成，按单文件插件继续
+      }
+    }
     $candidates = Get-ChildItem $dir.FullName -File | Where-Object {
       # 只收「装到机器上」的文件
       $_.Name -like '*.ts' -or $_.Name -like '*.rules.json' -or $_.Name -like 'smoke-*.mjs'
