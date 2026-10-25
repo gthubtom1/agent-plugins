@@ -10,4 +10,4 @@
 
 - **无公开仓库地址**：这些技能随 Orca 桌面端分发，装了 Orca 通常会自动注入 `~/.agents/skills/`；此目录只是没有 Orca 时的兜底。
 - 版权属原作者；本仓库只作个人环境备份，不做二次分发。
-- 恢复方式：`bash scripts/restore-machine.sh` 或 `powershell -File scripts/restore-machine.ps1` 会把它们拷回 `~/.agents/skills/<name>/SKILL.md`。
+- 恢复方式：`cp -r skills/* ~/.agents/skills/`（本仓库只存文件，不带安装脚本）。

@@ -197,7 +197,6 @@ pi install git:github.com/gthubtom1/agent-plugins@main
 说明这台机器上技能包不在已知位置** —— 设 `RELAB_SKILL_ROOT` 指向技能包根，或在
 rules.json 里写 `toolChainPaths`。不处理也能用（内置兜底表还在），只是少了文档派生。
 
-对账：`scripts/check-sync.ps1` 会比对本机扩展与 `manifest/extensions.sha256.json` 基线。
 
 ---
 

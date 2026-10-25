@@ -1,129 +1,91 @@
 # Agent Plugins Hub（多智能体插件库）
 
-全生态 AI Coding Agent 增强插件精选仓库。收录面向 **DeepSeek Harness (dsh)**、**PI-Desktop**、**Claude Code**、**Codex**、**OpenCode** 等主流智能体的优质插件与扩展。
+自制插件的**源码仓库**。每个插件自带 `README.md`（人看的说明）和安装方法；
+智能体读完文档就能装，**不需要任何安装脚本**。
 
-按宿主分层隔离，自包含架构，即插即用。
+> **给智能体的一句指令**：把这个仓库里需要的插件装上，装之前先把要装的东西编号列给我确认。
 
 ---
 
-## 📦 已收录插件清单
+## 📦 插件清单
 
-| 智能体分类 | 插件名称 | 说明 | 交互能力 | 状态 | 快速直达 |
+| 宿主 | 插件 | 说明 | 交互 | 状态 | 文档 |
 |---|---|---|---|---|---|
-| **Pi Agent** | `cmd-guard` | **命令执行守卫**：自动补 timeout / 物理拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看文档](plugins/pi/cmd-guard/README.md) |
-| **Pi Agent** | `retry-level` | **重试档位**：菜单切档 off/3/5/15/30/无限，状态栏常显 | `/retry [cycle\|status\|N]` | 🟢 生产就绪 | [查看文档](plugins/pi/retry-level/README.md) |
-| **Pi Agent** | `pi-prompt-compat` | **人格与粘性规则兼容层**：PERSONALITY.md + RULES.md 跨轮次常驻 | 斜杠命令 `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看文档](plugins/pi/pi-prompt-compat/README.md) |
-| **Pi Agent** | `pi-seep-ext · persona` | **按对话的人设**：人设就是目录里的 md 文件，随时切换/关闭，注入模式可选（cached 省 token） | 状态栏按钮 + `/persona` | 🟢 生产就绪 | [查看文档](plugins/pi/pi-seep-ext/README.md) |
-| **Pi Agent** | `pi-seep-ext · rewind` | **回退**：回到某条消息之前 / 只删最后一条回复，原文放回输入框（官方 `navigateTree`，不碰会话文件） | `/rewind` `/undo-reply` | 🟢 生产就绪 | [查看文档](plugins/pi/pi-seep-ext/README.md) |
-| **Pi Agent** | `pi-seep-ext · remote` | **手机连上**：局域网/Tailscale 地址、终端二维码、运行期生成密码、自检；不改 pi-web | `/remote` | 🟢 生产就绪 | [查看文档](plugins/pi/pi-seep-ext/README.md) |
-| **DSH** | `dsh-infinite-retry` | 仿 PI-Desktop 无限重试插件：遇网络波动/429限流持续重试直到成功 | 自带设置页 Switch 开关 | 🟢 生产就绪 | [查看文档](plugins/dsh/dsh-infinite-retry/README.md) |
+| **Pi** | `pi-seep-ext · persona` | **按对话的人设**：人设 = `personas/*.md`（文件名即名字），随时切换/关闭，`cached`（省 token）/ `every-turn` 两种注入；切「无人设」真的删掉系统提示词里的身份 | 状态栏按钮 + `/persona` | 🟢 生产就绪 | [查看](plugins/pi/pi-seep-ext/README.md) |
+| **Pi** | `pi-seep-ext · rewind` | **回退**：回到某条消息之前 / 只删最后一条回复，原文放回输入框（官方 `navigateTree`，不碰会话文件） | `/rewind` `/undo-reply` | 🟢 生产就绪 | [查看](plugins/pi/pi-seep-ext/README.md) |
+| **Pi** | `pi-seep-ext · remote` | **手机连上**：局域网/Tailscale 地址、终端二维码、运行期生成密码、5 行自检；不改 pi-web | `/remote` | 🟢 生产就绪 | [查看](plugins/pi/pi-seep-ext/README.md) |
+| **Pi** | `cmd-guard` | **命令执行守卫**：自动补 timeout / 拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看](plugins/pi/cmd-guard/README.md) |
+| **Pi** | `retry-level` | **重试档位**：菜单切档 off/3/5/10/15/30/无限，状态栏常显且可点 | `/retry` | 🟢 生产就绪 | [查看](plugins/pi/retry-level/README.md) |
+| **Pi** | `pi-prompt-compat` | **人格与粘性规则兼容层**：PERSONALITY.md + RULES.md 跨轮次常驻 | `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看](plugins/pi/pi-prompt-compat/README.md) |
+| **DSH** | `dsh-infinite-retry` | 仿 PI-Desktop 无限重试插件：遇网络波动/429 持续重试直到成功 | 自带设置页 Switch | 🟢 生产就绪 | [查看](plugins/dsh/dsh-infinite-retry/README.md) |
 | **PI-Desktop** | *(规划中)* | 面向 PI-Desktop 的原生 `.piplug` 扩展 | Work Panel / Sidecar | 🟡 建设中 | [分类主页](plugins/pi-desktop/README.md) |
 | **Claude Code** | *(规划中)* | 面向 Claude Code 的 MCP 工具与 Hook 增强 | 终端 CLI / Tools | 🟡 建设中 | [分类主页](plugins/claude-code/README.md) |
-| **Codex** | *(规划中)* | 面向 Codex 的本地自动化与环境桥接扩展 | CLI / Runtime | 🟡 建设中 | [分类主页](plugins/codex/README.md) |
+| **Codex** | *(规划中)* | 面向 Codex 的本地自动化与环境桥接 | CLI / Runtime | 🟡 建设中 | [分类主页](plugins/codex/README.md) |
 | **OpenCode** | *(规划中)* | 面向 OpenCode 的前端主题与工作流插件 | Webview / Extensions | 🟡 建设中 | [分类主页](plugins/opencode/README.md) |
 
+**第三方 pi 插件**（不在本仓库，用安装命令直接装，**永远是最新版**）：
+
+| 插件 | 装法 | 说明 |
+|---|---|---|
+| `@hk_net/pi-advisor` | `pi install npm:@hk_net/pi-advisor` | **顾问**：一轮结束后让第二个模型复查并投递意见，可手动 `/advise`。**注意**：热门的 `@bacnh85/pi-advisor` 只在终端工作（`ctx.mode !== "tui"` 直接跳过），pi-web 里用这个 |
+
 ---
 
-## 🧾 整机环境清单（插件 / 技能 / 配置）
+## 安装
 
-本仓库不只收自制插件，还是 **Toti 本机 AI Agent 环境的可复现清单**：
+### 本仓库的自制插件（一条命令）
 
-| 资产 | 位置 | 装法 |
-|---|---|---|
-| 第三方 pi 包（9 个，带锁定版本） | `manifest/pi-settings.json` · `docs/ENV-MANIFEST.md §2` | `pi install npm:<包>@<版本>` |
-| 自制 pi 扩展 | `plugins/pi/*`（含源码） | `pi install git:github.com/gthubtom1/agent-plugins@main` |
-| MCP server | ❌ **不入库** | 地址/端口/可执行文件路径都是本机的；换机后用 `pi mcp add` 现建（理由见 `docs/ENV-MANIFEST.md §5`） |
-| 技能（3 个备份） | `manifest/skills/` | 恢复脚本拷回 `~/.agents/skills/` |
-| 配置脱敏模板（models/settings/open-tui/keybindings/trust/web-search） | `manifest/*.json` | 恢复脚本写入 `~/.pi/agent/` |
-| 扩展哈希基线 | `manifest/extensions.sha256.json` | `scripts/check-sync.ps1` 对账 |
-| 纪律卡 hubcore（私有库） | `docs/ENV-MANIFEST.md §8` | 见该节 |
-
-> 密钥（`auth.json`、provider apiKey、MCP 令牌）**一律不入库**：仓内只有 `${NEWAPI_API_KEY}` 占位符，
-> `.gitignore` 也硬性忽略 `auth.json` / `manifest/local/`。
-
-**换机一条命令：**
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\restore-machine.ps1 -ToolRoot 'D:\Tools' -PyRoot 'D:\Tools\py' -NewApiKey 'sk-…' -X64dbgToken '…'
+```bash
+pi install git:github.com/gthubtom1/agent-plugins@main
 ```
 
-> 不传 `-ToolRoot` / `-PyRoot` 时依次取环境变量 `REVERSE_TOOL_ROOT` / `REVERSE_PY_ROOT`，
-> 都没有才用 `D:\Tools` / `D:\Tools\py`。换盘不用改脚本。
+根 `package.json` 的 `pi.extensions` 是安装清单；pi 会把仓库 checkout 下来按清单加载，
+所以**更新 = `pi update`**，不需要重新拷贝文件。
 
-完整说明（含每个插件的仓库地址、版本、落盘位置与踩坑）见 **[docs/ENV-MANIFEST.md](docs/ENV-MANIFEST.md)**。
+只装其中一包：
+
+```bash
+pi install <本地路径>/plugins/pi/pi-seep-ext
+```
+
+### 第三方插件
+
+用 npm 装，不锁版本、跟着上游更新：
+
+```bash
+pi install npm:@hk_net/pi-advisor
+```
 
 ---
 
-## 🏛️ 仓库目录结构
+## 仓库结构
 
 ```text
 agent-plugins/
-├── docs/                          # 规范与设计架构
-│   ├── ARCHITECTURE.md            # 多智能体插件统一架构设计说明
-│   ├── CONTRIBUTING.md            # 新插件接入与提交流程
-│   └── ENV-MANIFEST.md            # 本机整机环境清单（插件/技能/配置 + 恢复流程）
-├── manifest/                      # 本机环境脱敏模板与哈希基线（不含密钥）
-│   ├── pi-settings.json           # settings.json 模板（packages 锁定版本）
-│   ├── models.json                # provider + 模型表（apiKey 占位）
-│   ├── open-tui.json / web-search.json / keybindings.json / trust.json
-│   ├── extensions.sha256.json     # 扩展哈希基线（对账用）
-│   └── skills/                    # 3 个技能备份 + NOTICE
-├── scripts/
-│   ├── restore-machine.ps1        # Windows 换机恢复（幂等）
-│   ├── restore-machine.sh         # Git Bash / WSL 换机恢复
-│   ├── check-sync.ps1             # 本机扩展 vs 哈希基线对账
-│   ├── regen-extension-baseline.ps1 # 改了插件后重算基线（必跑，否则对账必报漂移）
-│   ├── split-servers.js           # agent-servers.json → 每 server 一个文件
-│   └── regen-manifest.js          # 在源机器上重新生成 manifest/（泄露即报错）
-└── plugins/                       # 各智能体专属分类目录
-    ├── dsh/                       # DeepSeek Harness 插件
-    │   └── dsh-infinite-retry/    # 无限重试插件（带 UI 开关）
-    ├── pi/                        # Pi Coding Agent 扩展
-    │   ├── cmd-guard/             # 命令执行守卫（清单推荐）
-    │   ├── retry-level/           # 重试档位（清单推荐）
-    │   └── pi-prompt-compat/      # 人格与粘性规则兼容层（清单推荐）
-    ├── pi-desktop/                # PI-Desktop 插件
-    ├── claude-code/               # Claude Code 扩展
-    ├── codex/                     # Codex 扩展
-    └── opencode/                  # OpenCode 扩展
+├── plugins/                     # 插件源码，一个宿主一个目录
+│   ├── pi/                      # Pi Coding Agent
+│   │   ├── pi-seep-ext/         #   人设 / 回退 / 远程（包形式：extensions/ + lib/ + test/）
+│   │   ├── cmd-guard/           #   单文件扩展
+│   │   ├── retry-level/
+│   │   └── pi-prompt-compat/
+│   ├── dsh/
+│   ├── claude-code/ codex/ opencode/ pi-desktop/   # 占位（只有 README）
+│   └── ...
+├── skills/                      # 现役技能备份（3 个），拷回 ~/.agents/skills/
+├── docs/
+│   ├── ARCHITECTURE.md          # 分层设计说明
+│   └── CONTRIBUTING.md          # 新插件接入流程
+└── package.json                 # pi.extensions = 安装清单
 ```
 
----
-
-## 🌟 核心设计原则
-
-1. **分级命名空间隔离**：不同智能体的技术栈（Cordis、piplug、MCP、CLI）彻底物理隔离，互不产生依赖污染。
-2. **独立自包含（Self-contained）**：每个插件自成一体，内含独立的 `package.json`、`README.md` 与许可证，支持直接单独拷贝或作为独立包分发。
-3. **用户体验优先**：关键行为变更（如重试策略、自动化工具）一律配备开关控件或配置项，支持随时停止与干净注销。
-
-## 🔁 改了插件之后（必做，否则下次换机会拿到旧版）
-
-```powershell
-# 1) 本机自测 —— 插件目录里都有 smoke 测试
-bun plugins\pi\pi-prompt-compat\smoke-prompt-compat.mjs
-
-# 2) 把新版本复制到本机 pi 家目录
-copy plugins\pi\pi-prompt-compat\prompt-compat.ts "$env:USERPROFILE\.pi\agent\extensions\" -Force
-
-# 3) 重算基线并当场对账（一条命令同时做两件事）
-powershell -ExecutionPolicy Bypass -File scripts\regen-extension-baseline.ps1 -PiHome $env:USERPROFILE\.pi\agent
-
-# 4) 单独对账（正常机器上退出码 0）
-powershell -ExecutionPolicy Bypass -File scripts\check-sync.ps1
-
-# 5) 提交
-git add -A && git commit -m "..." && git push
-```
+**没有的东西（刻意不放）**：安装脚本、环境快照、MCP 清单、哈希基线。
+原因：这些内容里几乎全是"这台机器"的路径、端口和令牌，换机后不可复用；
+插件本身是源码，智能体读文档 + 一条 `pi install` 就够了。
 
 ---
 
-## 📖 开发者文档
+## 约定
 
-- [查看架构设计文档](docs/ARCHITECTURE.md)
-- [查看插件开发与贡献指南](docs/CONTRIBUTING.md)
-
----
-
-## 📄 许可证
-
-本项目基于 [MIT License](LICENSE) 开源。
+- 单文件插件：源码 + `package.json`（`main` 指向 `.ts`）+ `README.md` + `LICENSE`。
+- 多文件/有依赖的插件：做成**包形式**（`package.json` 里写 `pi.extensions`），走 `pi install`。
+- 插件里不写死机器路径或用户名；需要外部程序时，运行时探测并给出安装提示。

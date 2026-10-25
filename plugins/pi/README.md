@@ -2,115 +2,87 @@
 
 收录面向 **Pi Coding Agent (`@earendil-works/pi-coding-agent`)** 的原生 TypeScript / JavaScript 扩展插件。
 
+> 这里只有**源码和文档**。没有安装脚本、没有环境快照、没有 MCP 清单 ——
+> 插件就是文件，装法是 `pi install`，具体步骤每个插件的 README 写清楚，智能体读完就能做。
+
 ---
 
-## 🚀 换机器怎么恢复（照这个做）
+## 🚀 装（三选一）
 
-### 方式〇：整机脚本（推荐，连配置/MCP/技能/模型表一起恢复）
-
-```powershell
-git clone https://github.com/gthubtom1/agent-plugins.git C:\Tools\agent-plugins
-powershell -ExecutionPolicy Bypass -File C:\Tools\agent-plugins\scripts\restore-machine.ps1 `
-    -ToolRoot 'D:\HACKER' -PyRoot 'D:\EXE' -NewApiKey 'sk-…' -X64dbgToken '…'
-```
-
-Git Bash / WSL：`TOOL_ROOT=... PY_ROOT=... NEWAPI_KEY=... X64DBG_TOKEN=... bash scripts/restore-machine.sh`
-
-它会装 pi 本体 + 本仓库（自制插件）+ 9 个第三方 npm 包（锁定版本），再把 `manifest/` 里的脱敏模板写回 `~/.pi/agent/`，把技能写回 `~/.agents/skills/`。完整清单见 [docs/ENV-MANIFEST.md](../../docs/ENV-MANIFEST.md)。
-
-### 方式一：一条命令装完自制插件（推荐）
+### 装全部自制插件（一条命令）
 
 ```bash
 pi install git:github.com/gthubtom1/agent-plugins@main
+pi list                 # 验证
 ```
 
-本仓库根目录有 `package.json` 的 `pi.extensions` 清单，pi 会按它装好全部 **PI 侧自制插件**。
+根 `package.json` 的 `pi.extensions` 是安装清单。pi 会把仓库 checkout 下来按清单加载，
+所以**更新只需要 `pi update`**（或重新执行上面的 install），不用重新拷文件。
 
-装完验证：
-
-```bash
-pi list                    # 看已配置包
-```
-
-### 方式二：补装公开插件（它们在 npm 上，不在本仓库）
-
-本仓库只放**自制**插件。公开插件用 npm 装：
+### 只装一个包
 
 ```bash
-pi install npm:pi-plan-task
-pi install npm:@demigodmode/pi-web-agent
-pi install npm:@aaronkyriesenbach/pi-package-manager
-pi install npm:pi-open-tui
-pi install npm:pi-web-access
-pi install npm:pi-mcp-adapter
-pi install npm:pi-tool-display
-pi install npm:pi-win-notify
-pi install npm:@gotgenes/pi-subagents
-```
-
-> **一次性把上面全装完**（复制整段）：
-
-```bash
-for p in pi-plan-task @demigodmode/pi-web-agent @aaronkyriesenbach/pi-package-manager \
-         pi-open-tui pi-web-access pi-mcp-adapter pi-tool-display pi-win-notify \
-         @gotgenes/pi-subagents; do pi install "npm:$p"; done
-```
-
-### 方式三：手工放文件（上面都不行时）
-
-```bash
-# 把仓库克隆下来，挑要用的插件目录，把里面的 .ts 拷进 pi 的扩展目录
-cp cmd-guard/cmd-guard.ts             ~/.pi/agent/extensions/
-cp cmd-guard/cmd-guard.rules.json     ~/.pi/agent/extensions/
-cp retry-level/retry-level.ts         ~/.pi/agent/extensions/
-cp pi-prompt-compat/prompt-compat.ts   ~/.pi/agent/extensions/
-
-# pi-seep-ext 是「包形式」插件（多文件 + 依赖），不要手工拷单个文件：
-pi install git:github.com/gthubtom1/agent-plugins@main
-# 或者只装这一包：
 pi install <仓库路径>/plugins/pi/pi-seep-ext
-# 重启 pi（扩展在启动时加载）
+pi -e     <仓库路径>/plugins/pi/pi-seep-ext     # 临时试一次，不写配置
 ```
 
----
+### 单文件插件（想放进 `~/.pi/agent/extensions/` 时）
 
-## 📋 公开插件清单（npm 上可下，本仓库不存文件）
+```bash
+cp cmd-guard/cmd-guard.ts            ~/.pi/agent/extensions/
+cp cmd-guard/cmd-guard.rules.json    ~/.pi/agent/extensions/
+cp retry-level/retry-level.ts        ~/.pi/agent/extensions/
+cp pi-prompt-compat/prompt-compat.ts ~/.pi/agent/extensions/
+```
 
-| 插件 | 作用 | 安装 |
-|---|---|---|
-| `pi-plan-task` | 任务计划 | `pi install npm:pi-plan-task` |
-| `@demigodmode/pi-web-agent` | Web Agent 能力 | `pi install npm:@demigodmode/pi-web-agent` |
-| `@aaronkyriesenbach/pi-package-manager` | 包管理器界面 | `pi install npm:@aaronkyriesenbach/pi-package-manager` |
-| `pi-open-tui` | TUI 增强 | `pi install npm:pi-open-tui` |
-| `pi-web-access` | 联网访问 | `pi install npm:pi-web-access` |
-| `pi-mcp-adapter` | MCP 适配 | `pi install npm:pi-mcp-adapter` |
-| `pi-tool-display` | 工具调用展示 | `pi install npm:pi-tool-display` |
-| `pi-win-notify` | Windows 桌面通知 | `pi install npm:pi-win-notify` |
-| `@gotgenes/pi-subagents` | 子代理 | `pi install npm:@gotgenes/pi-subagents` |
+> `pi-seep-ext` 是**包形式**（多文件 + 依赖），不要手工拷单个文件，用上面的 `pi install`。
+
+装完**新开一个会话**生效（扩展在会话启动时加载）。
 
 ---
 
-## 🔌 MCP / 技能 / 配置（在本仓库登记）
-
-| 类别 | 条数 | 落点 | 登记位置 |
-|---|---|---|---|
-| MCP server（pi 侧） | 10（jshook / reqable / playwright / chrome-devtools / xquik / idalib / idapro / x64dbg / x64dbg32 等） | `~/.pi/agent/mcp.json` | `manifest/mcp.json`（token 占位） |
-| MCP server（Orca 侧） | 4（context7 / everything / playwright / sequential-thinking） | `~/.agents/servers/*.json` | `manifest/agent-servers.json` |
-| 技能 | 3（computer-use / orca-cli / orchestration） | `~/.agents/skills/` | `manifest/skills/` |
-| 配置模板 | settings / models / open-tui / keybindings / trust / web-search | `~/.pi/agent/` | `manifest/*.json` |
-
----
-
-## 🔧 自制插件清单（本仓库保存源码）
+## 📋 自制插件（本仓库保存源码）
 
 | 插件 | 说明 | 交互形式 | 状态 | 文档 |
 |---|---|---|---|---|
-| `cmd-guard` | **命令执行守卫**：自动补 timeout / 物理拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看](cmd-guard/README.md) |
-| `retry-level` | **重试档位**：菜单切档（off/3/5/10/15/30/无限），状态栏常显，无限档可 Esc 中断 | `/retry` `/retry cycle` `/retry status` | 🟢 生产就绪 | [查看](retry-level/README.md) |
-| `pi-prompt-compat` | **人格与粘性规则兼容层**：PERSONALITY.md + RULES.md 跨轮次常驻 | 斜杠命令 `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看](pi-prompt-compat/README.md) |
 | `pi-seep-ext · persona` | **按对话的人设**：人设 = `personas/*.md`（文件名就是名字），随时切换/关闭，`cached`（省 token）或 `every-turn` 注入；切「无人设」会真的删掉系统提示词里的身份 | 状态栏按钮 + `/persona` | 🟢 生产就绪 | [查看](pi-seep-ext/README.md) |
 | `pi-seep-ext · rewind` | **回退**：回到某条消息之前、或只删最后一条回复，原文放回输入框（官方 `navigateTree`，不碰会话文件） | `/rewind` `/undo-reply` | 🟢 生产就绪 | [查看](pi-seep-ext/README.md) |
 | `pi-seep-ext · remote` | **手机连上**：局域网/Tailscale 地址、终端二维码、运行期生成密码、5 行自检；不改 pi-web | `/remote` | 🟢 生产就绪 | [查看](pi-seep-ext/README.md) |
+| `cmd-guard` | **命令执行守卫**：自动补 timeout / 物理拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看](cmd-guard/README.md) |
+| `retry-level` | **重试档位**：菜单切档（off/3/5/10/15/30/无限），状态栏常显且可点，无限档可 Esc 中断 | `/retry` | 🟢 生产就绪 | [查看](retry-level/README.md) |
+| `pi-prompt-compat` | **人格与粘性规则兼容层**：PERSONALITY.md + RULES.md 跨轮次常驻 | `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看](pi-prompt-compat/README.md) |
+
+---
+
+## 🌐 第三方插件（npm 上，装法只写命令，永远跟着上游更新）
+
+| 插件 | 作用 | 安装 |
+|---|---|---|
+| `@hk_net/pi-advisor` | **顾问**：一轮结束后让第二个模型复查并投递意见（可按需 `/advise` 手动触发） | `pi install npm:@hk_net/pi-advisor` |
+
+> **为什么是这一个**：最热门的 [`@bacnh85/pi-advisor`](https://www.npmjs.com/package/@bacnh85/pi-advisor)
+> 在 `agent_settled` 里写着 `if (ctx.mode !== "tui") return` —— **只在终端工作，pi-web 里什么都不做**。
+> `@hk_net/pi-advisor` 没有这道门，pi-web 里能正常审查并 `sendMessage` 到对话里。
+> 详见 [`pi-advisor/README.md`](pi-advisor/README.md)。
+
+其它按需自装（本仓库不登记、不锁版本）：
+
+```bash
+pi install npm:pi-web-access          # 联网访问
+pi install npm:pi-tool-display        # 工具调用展示
+pi install npm:pi-open-tui            # TUI 增强
+pi install npm:pi-mcp-adapter         # MCP 适配层
+```
+
+---
+
+## 🧩 技能备份
+
+`skills/` 下是 3 个现役技能（computer-use / orca-cli / orchestration），拷回即可用：
+
+```bash
+cp -r skills/* ~/.agents/skills/
+```
 
 ---
 
