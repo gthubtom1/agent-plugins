@@ -1,0 +1,117 @@
+{
+  "repository": "https://github.com/gthubtom1/SRL",
+  "commit": "48ccdbf4271cf6a97c366f2f37d2034dcd817b58",
+  "scope": "First-party Pi extension source backup only; not a complete Seep deployment",
+  "files": [
+    {
+      "path": "extensions/answer-gate.ts",
+      "source": "Tool/prompts/extensions/answer-gate.ts",
+      "sha256": "4e52fa09142d9bfb1c44bf7f0556a04002b3fd78c2ad3caad6014966eafe324e"
+    },
+    {
+      "path": "extensions/cmd-guard.rules.json",
+      "source": "Tool/prompts/extensions/cmd-guard.rules.json",
+      "sha256": "31fbe53f295bebd45b03794bdd33a6a19fa1c62359fc0541c150010044a80c8a"
+    },
+    {
+      "path": "extensions/cmd-guard.ts",
+      "source": "Tool/prompts/extensions/cmd-guard.ts",
+      "sha256": "43b74236c5393c61d6248aee5732055b4f4f468b7fda551c5d8590bb80743403"
+    },
+    {
+      "path": "extensions/load-system-prompt.ts",
+      "source": "Tool/prompts/extensions/load-system-prompt.ts",
+      "sha256": "549732cb01a55bce687e16d6bfe9678d61f51e37af96f2c819cea95b85fdbc26"
+    },
+    {
+      "path": "extensions/retry-level.ts",
+      "source": "Tool/prompts/extensions/retry-level.ts",
+      "sha256": "783ba8ad34476122ef005c307dfce2ea3a46fbc1be4e0ed89b8cc9ef2bf108ab"
+    },
+    {
+      "path": "extensions/security-audit-interceptor.ts",
+      "source": "Tool/prompts/extensions/security-audit-interceptor.ts",
+      "sha256": "1e2c0f6cc100d666be7ffc37d246efd51609367c7ecf3319270b071702bf54b3"
+    },
+    {
+      "path": "extensions/seep-circuit.ts",
+      "source": "Tool/prompts/extensions/seep-circuit.ts",
+      "sha256": "0b8e902e965390afa44d9e71ae47c8ff243eda6c406cd9f0980299ced175f9bc"
+    },
+    {
+      "path": "extensions/seep-events.ts",
+      "source": "Tool/prompts/extensions/seep-events.ts",
+      "sha256": "2bfa9cae4ad7ff815ce24a023db455583456a9621074d5599d21d504bb4a8f83"
+    },
+    {
+      "path": "extensions/seep-memory.ts",
+      "source": "Tool/prompts/extensions/seep-memory.ts",
+      "sha256": "996eb7de96028fe84a0bc8585efdf17b82ea61186dc37ea29e476e46ae1d0cd0"
+    },
+    {
+      "path": "extensions/TOOL-CHAIN.md",
+      "source": "Tool/prompts/extensions/TOOL-CHAIN.md",
+      "sha256": "65ccbdba4da0760dabe5d5d05f055c2ebe5bcd0881267b0583d3649af93f04ac"
+    },
+    {
+      "path": "packages/pi-seep-ext/extensions/persona.ts",
+      "source": "Tool/prompts/packages/pi-seep-ext/extensions/persona.ts",
+      "sha256": "fd271c391da610bbaa5b8dc6a2e592a67d107c0f22b3317302daa1f2101cc2b6"
+    },
+    {
+      "path": "packages/pi-seep-ext/extensions/rewind.ts",
+      "source": "Tool/prompts/packages/pi-seep-ext/extensions/rewind.ts",
+      "sha256": "01e0c609ebb2a99c27b1da6ceda0e7f3c8dc2e0d436b3c15fd8f0ca1b2355c80"
+    },
+    {
+      "path": "packages/pi-seep-ext/lib/agent-dir.ts",
+      "source": "Tool/prompts/packages/pi-seep-ext/lib/agent-dir.ts",
+      "sha256": "88a6df20d1194d2100c12ccfd4c7a62a392ca7730ece5eb0cd8df6064b443896"
+    },
+    {
+      "path": "packages/pi-seep-ext/lib/case-dir.ts",
+      "source": "Tool/prompts/packages/pi-seep-ext/lib/case-dir.ts",
+      "sha256": "62b75904de6798cf0041a29404fd19867e9cafef19026307ee622c827ef4ccb5"
+    },
+    {
+      "path": "packages/pi-seep-ext/lib/inject.ts",
+      "source": "Tool/prompts/packages/pi-seep-ext/lib/inject.ts",
+      "sha256": "b418c85ccd1b38013744516da41474ec4f7d34faa76d5fa73cad510f55a8b752"
+    },
+    {
+      "path": "packages/pi-seep-ext/lib/personas.ts",
+      "source": "Tool/prompts/packages/pi-seep-ext/lib/personas.ts",
+      "sha256": "5d5d7e8b36d1636983d5808edbc627f6f13c9502997c4dfb4db9f034fed09ddd"
+    },
+    {
+      "path": "packages/pi-seep-ext/lib/pi-api.ts",
+      "source": "Tool/prompts/packages/pi-seep-ext/lib/pi-api.ts",
+      "sha256": "3b9ecf243e5683277385c1a3e7983bb7205512ad425088cad641ffbb73ceee82"
+    },
+    {
+      "path": "packages/pi-seep-ext/lib/rewind-targets.ts",
+      "source": "Tool/prompts/packages/pi-seep-ext/lib/rewind-targets.ts",
+      "sha256": "9595f02d7d09c11b0d841c333374acdefc9ed5c108f0569fb167dd6d767f1826"
+    },
+    {
+      "path": "packages/pi-seep-ext/lib/session-state.ts",
+      "source": "Tool/prompts/packages/pi-seep-ext/lib/session-state.ts",
+      "sha256": "5e10d142659b4df49caabaa5e8a2c51bd665ed4e80fa2490557b07642ae4c863"
+    },
+    {
+      "path": "packages/pi-seep-ext/LICENSE",
+      "source": "Tool/prompts/packages/pi-seep-ext/LICENSE",
+      "sha256": "eb8f136f6ea8c474205493ce95e2559c72aa4deb3bb23ce7c09ad4b969be4b8d"
+    },
+    {
+      "path": "packages/pi-seep-ext/package.json",
+      "source": "Tool/prompts/packages/pi-seep-ext/package.json",
+      "sha256": "ec851227e87b7517823fd8603066abe35a070b6f2e2083be88894eff65a28dca"
+    },
+    {
+      "path": "packages/pi-seep-ext/UPSTREAM.json",
+      "source": "Tool/prompts/packages/pi-seep-ext/UPSTREAM.json",
+      "sha256": "48320e8777f4de3a9c32e71fee99b6d2a9e13c1ff5ace13e4ef62a540bea3ed6"
+    }
+  ]
+}

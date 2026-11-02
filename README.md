@@ -23,6 +23,15 @@
 | **Codex** | *(规划中)* | 面向 Codex 的本地自动化与环境桥接 | CLI / Runtime | 🟡 建设中 | [分类主页](plugins/codex/README.md) |
 | **OpenCode** | *(规划中)* | 面向 OpenCode 的前端主题与工作流插件 | Webview / Extensions | 🟡 建设中 | [分类主页](plugins/opencode/README.md) |
 
+### Seep 部署用户特别说明
+
+Seep 中二开过的自有扩展已同步回来。通用插件保持独立可装；完整 Seep 适配代码另存为
+[seep-workbench](plugins/pi/seep-workbench/README.md)，**不加入根安装清单**。
+
+- 已经通过 Seep 安装器部署的人，不要再把本仓库根包整包装一遍；人设、守卫、重试、提示词会重复加载。
+- 新设备部署 Seep 仍按 [Seep 主仓库](https://github.com/gthubtom1/SRL) 的安装流程；本仓库不是技能、KB、工具和 MCP 的替代安装器。
+- 本次同步范围、来源和复验见 [同步说明](docs/SEEP-SYNC-2026-11-02.md)。第三方下载内容未更新。
+
 **第三方 pi 插件**（不在本仓库，用安装命令直接装，**永远是最新版**）：
 
 | 插件 | 装法 | 说明 |
@@ -78,9 +87,9 @@ agent-plugins/
 └── package.json                 # pi.extensions = 安装清单
 ```
 
-**没有的东西（刻意不放）**：安装脚本、环境快照、MCP 清单、哈希基线。
+**没有的东西（刻意不放）**：安装脚本、环境快照、MCP 清单、机器部署哈希基线。
 原因：这些内容里几乎全是"这台机器"的路径、端口和令牌，换机后不可复用；
-插件本身是源码，智能体读文档 + 一条 `pi install` 就够了。
+插件本身是源码，智能体读文档 + 一条 `pi install` 就够了。Seep 专用包的 `SOURCE.json` 只记录公开源码来源与哈希，不是本机环境快照。
 
 ---
 

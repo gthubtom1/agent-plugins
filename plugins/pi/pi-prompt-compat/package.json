@@ -1,10 +1,10 @@
 {
   "name": "pi-prompt-compat",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Pi Coding Agent 人格 (PERSONALITY.md) 与全局粘性规则 (RULES.md) 提示词兼容层扩展",
   "main": "prompt-compat.ts",
   "scripts": {
-    "test": "bun smoke-prompt-compat.mjs"
+    "test": "node smoke-prompt-compat.mjs"
   },
   "keywords": [
     "pi",
@@ -19,5 +19,10 @@
   "license": "MIT",
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=1.0.0"
+  },
+  "pi": {
+    "extensions": [
+      "./prompt-compat.ts"
+    ]
   }
 }

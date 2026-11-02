@@ -96,3 +96,9 @@ test("formatCandidate marks tool turns so the picker explains why it will ask", 
   const [withTools] = listRewindCandidates([user("u1", "跑一下"), toolResult("t1")]);
   assert.equal(formatCandidate(withTools), "1. 跑一下  [tools]");
 });
+
+ test("rewinding an earlier plain turn includes later tool side effects", () => {
+ const candidates = listRewindCandidates([user("u1", "plain"), assistant("a1", "ok"),
+   user("u2", "work"), toolResult("t1"), user("u3", "plain again"), assistant("a3", "ok")]);
+ assert.deepEqual(candidates.map(c => c.hasToolWork), [true, true, false]);
+});

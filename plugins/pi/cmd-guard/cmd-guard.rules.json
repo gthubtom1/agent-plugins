@@ -1,6 +1,6 @@
 {
   "_说明": "cmd-guard 规则。改完 30 秒内自动生效，或 /guard reload 立即生效。",
-  "_技能包根": "留空(null) = 自动探测。探测顺序：环境变量 RELAB_SKILL_ROOT / REVERSE_SKILL_ROOT → 本文件往上找含 TOOL-CHAIN.md 的目录 → C:/relab2、C:/relab。换机不用改这里。",
+  "_技能包根": "留空(null) = 自动探测。探测顺序：环境变量 CMD_GUARD_SKILL_ROOT（兼容 RELAB_SKILL_ROOT / REVERSE_SKILL_ROOT）→ 本文件往上找含 TOOL-CHAIN.md 的目录。换机不用改这里。",
   "skillRoot": null,
   "_文档来源": "额外再从这些 Markdown 派生 GUI 名单（`` `a.exe`→`b` `` 或表格行）。默认已含 <技能包根>/TOOL-CHAIN.md、skillpack/skills/TOOLS.md、skillpack/skills/SKILL.md。写绝对路径才生效；不存在就跳过。",
   "toolChainPaths": [],

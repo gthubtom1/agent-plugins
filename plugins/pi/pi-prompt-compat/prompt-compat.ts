@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
+import { resolveAgentDir } from "./lib/agent-dir.ts";
+import { patchSystemSections, renderSection } from "./lib/inject.ts";
+import { resolvePersonaSelection } from "./lib/session-state.ts";
 
 // ============================================================================
 // Types
@@ -101,7 +104,7 @@ export function discoverCompatibilityFiles(cwd: string): DiscoveredFiles {
 	const userDirs: string[] = [];
 
 	if (process.env.PI_CODING_AGENT_DIR) {
-		userDirs.push(resolve(process.env.PI_CODING_AGENT_DIR));
+		userDirs.push(resolve(resolveAgentDir()));
 	}
 	userDirs.push(join(home, ".pi", "agent"));
 
@@ -459,6 +462,15 @@ export default function (pi: ExtensionAPI) {
 	const debugTracker = new DebugTracker();
 	const personalityLoader = new PersonalityLoader();
 	const rulesLoader = new RulesLoader();
+	const sourcesBySession = new Map<string, Array<string | null | undefined>>();
+	const sessionKey = (ctx: ExtensionContext) => {
+		const manager = ctx.sessionManager as unknown as { getSessionId?(): string };
+		return manager?.getSessionId?.() || resolve(ctx.cwd);
+	};
+	const directoryPersonaSelected = (ctx: ExtensionContext) => {
+		const entries = ctx.sessionManager?.getEntries?.() ?? [];
+		return resolvePersonaSelection(resolveAgentDir(), entries) !== undefined;
+	};
 
 	// 1. Register CLI flags
 	pi.registerFlag("rules-debug", {
@@ -558,12 +570,15 @@ export default function (pi: ExtensionAPI) {
 			event.systemPromptOptions.appendSystemPrompt,
 			...(event.systemPromptOptions.contextFiles?.map((f) => f.content) ?? []),
 		];
+		sourcesBySession.set(sessionKey(ctx), promptSources);
 
-		const assembled = syncPromptState(ctx.cwd, promptSources);
+		const assembled = syncPromptState(ctx.cwd, promptSources, true);
 
 		event.systemPromptOptions.sections = event.systemPromptOptions.sections ?? {};
 
-		if (assembled.personalitySection) {
+		if (directoryPersonaSelected(ctx)) {
+			// The persona extension owns this slot, including explicit off.
+		} else if (assembled.personalitySection) {
 			event.systemPromptOptions.sections["personality"] = assembled.personalitySection;
 		} else {
 			delete event.systemPromptOptions.sections["personality"];
@@ -581,46 +596,30 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// 4. Lifecycle hook: context_with_system
-	pi.on("context_with_system", (event, _ctx: ExtensionContext) => {
-		const head = event.messages[0];
-		let rulesPresent = false;
-		let personalityPresent = false;
-
-		const cachedPersonality = personalityLoader.getCached();
-		const cachedRules = rulesLoader.getCached();
-
-		if (head && head.role === "system") {
-			const sections = (head as { sections?: Record<string, string | null> }).sections;
-			if (sections) {
-				if (sections["generic-rules"]) rulesPresent = true;
-				if (sections["personality"]) personalityPresent = true;
-			}
-
-			const contentStr = typeof head.content === "string" ? head.content : "";
-			if (!rulesPresent && contentStr.includes("<generic-rules>")) rulesPresent = true;
-			if (!personalityPresent && contentStr.includes("<personality>")) personalityPresent = true;
-
-			if (!personalityPresent && cachedPersonality) {
-				const assembled = assembleCompatibilitySections(cachedPersonality, []);
-				if (assembled.personalitySection) {
-					head.sections = head.sections ?? {};
-					head.sections["personality"] = assembled.personalitySection;
-					personalityPresent = true;
-				}
-			}
-
-			if (!rulesPresent && cachedRules.length > 0) {
-				const assembled = assembleCompatibilitySections(null, cachedRules);
-				if (assembled.rulesSection) {
-					head.sections = head.sections ?? {};
-					head.sections["generic-rules"] = assembled.rulesSection;
-					rulesPresent = true;
-				}
-			}
+	pi.on("context_with_system", (event, ctx: ExtensionContext) => {
+		if (event.messages[0]?.role !== "system") return;
+		// Re-read this session's files at every provider call, including tool
+		// continuations. Repair the last delta, not an overridden first message.
+		const assembled = syncPromptState(ctx.cwd, sourcesBySession.get(sessionKey(ctx)) ?? [], true);
+		const desired: Record<string, string | null> = {
+			"generic-rules": assembled.rulesSection,
+		};
+		if (!directoryPersonaSelected(ctx)) desired.personality = assembled.personalitySection;
+		patchSystemSections(event.messages, Object.fromEntries(
+			Object.entries(desired).map(([name, text]) => [name, text ? renderSection(name, text) : null]),
+		));
+		const effectiveSections: Record<string, string | null> = {};
+		for (const message of event.messages) {
+			if (message.role === "system") Object.assign(effectiveSections, message.sections ?? {});
 		}
+		const rulesPresent = !!effectiveSections["generic-rules"];
+		const personalityPresent = !!effectiveSections.personality;
 
 		const reqNum = debugTracker.recordRequest(rulesPresent, personalityPresent);
 		debugTracker.log(`LLM Request #${reqNum}: rulesPresent=${rulesPresent}, personalityPresent=${personalityPresent}`);
+	});
+	pi.on("session_shutdown", (_event, ctx: ExtensionContext) => {
+		sourcesBySession.delete(sessionKey(ctx));
 	});
 
 	// 5. Lifecycle hook: before_provider_request

@@ -1,17 +1,9 @@
+import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
 import { resolveAgentDir } from "../lib/agent-dir.ts";
-import {
-  PERSONALITY_SECTION,
-  RULES_SECTION,
-  buildForcedPrefix,
-  buildInjection,
-  patchSections,
-  stripPersonalityBlocks,
-  stripPersonalityFromMessages,
-} from "../lib/inject.ts";
+import { PERSONALITY_SECTION, patchSystemSections, renderSection } from "../lib/inject.ts";
 import type {
   BeforeAgentStartEvent,
   CommandContext,
-  ContextEvent,
   ContextWithSystemEvent,
   ExtensionApi,
   SessionEntryLike,
@@ -21,13 +13,12 @@ import {
   listPersonas,
   personasDir,
   readPersonaText,
-  readRulesText,
   readSettings,
   writeSettings,
   type PersonaInjectMode,
   type PersonaSettings,
 } from "../lib/personas.ts";
-import { PERSONA_STATE_TYPE, isPersonaStateType, readPersonaState } from "../lib/session-state.ts";
+import { PERSONA_STATE_TYPE, resolvePersonaSelection } from "../lib/session-state.ts";
 
 /**
  * Per-conversation personas, as a pi extension.
@@ -36,8 +27,8 @@ import { PERSONA_STATE_TYPE, isPersonaStateType, readPersonaState } from "../lib
  * the persona's name, so adding, renaming and retiring personas is done in a
  * file manager. Which persona a conversation uses is stored *in that
  * conversation* (an append-only session entry), which is what makes the choice
- * per-conversation rather than global, and what makes a rewind restore the
- * persona that was in force at that point in the branch.
+ * per-conversation. Rewinding turns leaves the latest conversation choice in
+ * force, including an explicit choice of no persona.
  *
  * Entry points, in the order a person meets them:
  *
@@ -78,31 +69,12 @@ export default function personaExtension(pi: ExtensionApi): void {
    * explicit "none"), otherwise the configured default, and a default whose file
    * has since been deleted counts as none.
    */
-  function currentPersona(branch: readonly SessionEntryLike[], settings: PersonaSettings): string | null {
-    const recorded = readPersonaState(branch);
-    if (recorded !== undefined) {
-      return recorded && readPersonaText(agentDir, recorded) ? recorded : null;
-    }
-    if (!settings.defaultId) return null;
-    return readPersonaText(agentDir, settings.defaultId) ? settings.defaultId : null;
+  function currentPersona(entries: readonly SessionEntryLike[], settings: PersonaSettings): string | null {
+    return resolvePersonaSelection(agentDir, entries, settings) ?? null;
   }
 
-  /**
-   * A section belongs to this extension once the branch carries one of its
-   * entries. Before that it may be another extension's `PERSONALITY.md`, which
-   * this extension must not delete when its own persona is cleared.
-   */
-  function ownedSections(branch: readonly SessionEntryLike[]): Set<string> {
-    const used = branch.some((entry) => entry.type === "custom" && isPersonaStateType(entry.customType));
-    return used ? new Set([PERSONALITY_SECTION, RULES_SECTION]) : new Set<string>();
-  }
-
-  function injectionFor(branch: readonly SessionEntryLike[], settings: PersonaSettings) {
-    return buildInjection({
-      personality: readPersonaText(agentDir, currentPersona(branch, settings)),
-      rules: readRulesText(agentDir),
-    });
-  }
+  // generic-rules belongs to the prompt compatibility / workbench extension.
+  // This extension owns only the named personality section, never message text.
 
   /**
    * Where the current persona shows up, using only what an extension may paint:
@@ -132,23 +104,36 @@ export default function personaExtension(pi: ExtensionApi): void {
   }
 
   function recordPersona(ctx: CommandContext, personaId: string | null): void {
-    pi.appendEntry(PERSONA_STATE_TYPE, { personaId });
+    try {
+      pi.appendEntry(PERSONA_STATE_TYPE, { personaId });
+    } catch (error) {
+      ctx.ui.notify(`未能保存人设选择：${String(error)}`, "error");
+      return;
+    }
     updateIndicators(ctx);
     ctx.ui.notify(personaId ? `人设：${personaId}（本对话）` : "人设：无（本对话）", "info");
   }
 
+  function saveSettings(ctx: CommandContext, patch: Record<string, unknown>): PersonaSettings | null {
+    try {
+      return writeSettings(patch, agentDir);
+    } catch (error) {
+      ctx.ui.notify(`未能保存人设设置：${String(error)}`, "error");
+      return null;
+    }
+  }
+
   async function pickMode(ctx: CommandContext, settings: PersonaSettings): Promise<void> {
     const labels: Record<PersonaInjectMode, string> = {
-      cached: "cached（省 token，走提示词缓存）",
-      "every-turn": "every-turn（每轮强制写进系统提示词）",
+      cached: "cached（结构化增量，保留提示词缓存）",
+      "every-turn": "every-turn（每次模型请求重放完整系统提示词与当前人设）",
     };
-    const options = (Object.keys(labels) as PersonaInjectMode[]).map(
-      (mode) => (settings.mode === mode ? `● ${labels[mode]}` : labels[mode]),
-    );
+    const modes = Object.keys(labels) as PersonaInjectMode[];
+    const options = modes.map((mode) => `${settings.mode === mode ? "● " : ""}${labels[mode]}`);
     const choice = await ctx.ui.select("注入模式（全局，影响所有人设）", options);
     if (choice === undefined) return;
-    const mode: PersonaInjectMode = choice.includes("cached") ? "cached" : "every-turn";
-    writeSettings({ mode }, agentDir);
+    const mode = modes[options.indexOf(choice)];
+    if (!mode || !saveSettings(ctx, { mode })) return;
     ctx.ui.notify(`注入模式：${mode}`, "info");
   }
 
@@ -193,7 +178,7 @@ export default function personaExtension(pi: ExtensionApi): void {
       if (arg === "mode") return pickMode(ctx, settings);
       if (arg === "badge") {
         const showBadge = !settings.showBadge;
-        writeSettings({ showBadge }, agentDir);
+        if (!saveSettings(ctx, { showBadge })) return;
         updateIndicators(ctx);
         ctx.ui.notify(showBadge ? "已显示人设徽标（输入框上方一行）" : "已隐藏人设徽标", "info");
         return;
@@ -224,87 +209,35 @@ export default function personaExtension(pi: ExtensionApi): void {
   });
 
   pi.on("before_agent_start", (event: BeforeAgentStartEvent, ctx) => {
-    try {
-      const branch = sessionEntriesOf(ctx as unknown as CommandContext);
-      const settings = readSettings(agentDir);
-      const injection = injectionFor(branch, settings);
-      const owned = ownedSections(branch);
-
-      if (settings.mode === "every-turn") {
-        // Drop any section this extension wrote in cached mode, so the forced
-        // prompt is the only copy of the persona.
-        const sections = event.systemPromptOptions?.sections;
-        if (sections) patchSections({ sections, injection: { personality: null, rules: null }, owned });
-
-        const prefix = buildForcedPrefix(injection);
-        if (!prefix) return undefined;
-        const base = injection.personality
-          ? stripPersonalityBlocks(event.systemPrompt || "")
-          : (event.systemPrompt || "").trim();
-        return { systemPrompt: base ? `${prefix}\n\n${base}` : prefix };
-      }
-
-      // cached: the persona lives in structured sections, which pi diffs against
-      // the transcript, so the prompt stays byte-identical between turns and the
-      // provider's cache keeps working. Clearing the persona deletes the section
-      // (pi records `{personality: null}`), which is what makes "无人设" real.
-      const options = event.systemPromptOptions ?? (event.systemPromptOptions = {});
-      options.sections = options.sections ?? {};
-      patchSections({ sections: options.sections, injection, owned });
-
-      // Another extension may force an opaque prompt; sections would be dropped
-      // silently, so force the same text into that prompt as well.
-      if (options.forceSystemPrompt !== undefined) {
-        const prefix = buildForcedPrefix(injection);
-        if (!prefix) return undefined;
-        const base = injection.personality
-          ? stripPersonalityBlocks(event.systemPrompt || options.forceSystemPrompt)
-          : (event.systemPrompt || options.forceSystemPrompt).trim();
-        return { systemPrompt: base ? `${prefix}\n\n${base}` : prefix };
-      }
-      return undefined;
-    } catch {
-      // A prompt hook must never break a run: fall back to pi's own prompt.
-      return undefined;
-    }
+    const selection = resolvePersonaSelection(agentDir, sessionEntriesOf(ctx));
+    if (selection === undefined) return; // Legacy PERSONALITY.md owns this slot.
+    const options = event.systemPromptOptions ?? (event.systemPromptOptions = {});
+    options.sections ??= {};
+    const text = readPersonaText(agentDir, selection);
+    // Keep personality before workbench rules/boundaries in either load order.
+    const otherSections = { ...options.sections };
+    delete otherSections[PERSONALITY_SECTION];
+    options.sections = text ? { [PERSONALITY_SECTION]: text, ...otherSections } : otherSections;
   });
 
-  /**
-   * History carries no persona *text*.
-   *
-   * Switching personas replaces the prompt, but copies of the old instructions
-   * can survive inside messages: a compaction summary that quoted them, a custom
-   * message from another implementation, an assistant reply that echoed them.
-   * Those are instructions, not history, so they are removed from what the model
-   * is shown. The session file is untouched, and everything else in the message
-   * stays byte for byte — which is why this cannot damage the conversation.
-   *
-   * It does not, and cannot, remove the *style* of earlier replies: that is the
-   * model's own output, and dropping those turns is `/rewind`'s job.
-   */
-  pi.on("context", (event: ContextEvent) => {
-    try {
-      if (!stripPersonalityFromMessages(event.messages)) return undefined;
-      return { messages: event.messages };
-    } catch {
-      return undefined;
-    }
-  });
-
-  // cached mode: keep the sections present after a compaction rewrote the prompt.
   pi.on("context_with_system", (event: ContextWithSystemEvent, ctx) => {
-    try {
-      const settings = readSettings(agentDir);
-      if (settings.mode !== "cached") return undefined;
-      const head = event.messages[0];
-      if (!head || head.role !== "system") return undefined;
-      stripPersonalityFromMessages(event.messages);
-      const branch = sessionEntriesOf(ctx as unknown as CommandContext);
-      head.sections = head.sections ?? {};
-      patchSections({ sections: head.sections, injection: injectionFor(branch, settings), owned: ownedSections(branch) });
-      return undefined;
-    } catch {
-      return undefined;
+    if (event.messages[0]?.role !== "system") return;
+    const settings = readSettings(agentDir);
+    const selection = resolvePersonaSelection(agentDir, sessionEntriesOf(ctx), settings);
+    if (selection !== undefined) {
+      const text = readPersonaText(agentDir, selection);
+      patchSystemSections(event.messages, {
+        [PERSONALITY_SECTION]: text ? renderSection(PERSONALITY_SECTION, text) : null,
+      });
     }
+    if (settings.mode !== "every-turn") return;
+
+    // Every provider call (including tool continuations) gets a fresh, complete
+    // checkpoint. Pi replays sections AND tool declarations itself. Delaying
+    // this until context time includes every before_agent_start handler, in
+    // either load order. Cached mode keeps Pi's original transcript deltas.
+    // Nothing here inspects or edits conversation text, images, or attachments.
+    const head = getCurrentSystemMessage(event.messages as Parameters<typeof getCurrentSystemMessage>[0]);
+    if (head) return { messages: [head, ...event.messages.filter((message) => message.role !== "system")] };
   });
 }

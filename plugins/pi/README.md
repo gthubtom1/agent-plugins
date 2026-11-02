@@ -32,10 +32,11 @@ pi -e     <仓库路径>/plugins/pi/pi-seep-ext     # 临时试一次，不写�
 cp cmd-guard/cmd-guard.ts            ~/.pi/agent/extensions/
 cp cmd-guard/cmd-guard.rules.json    ~/.pi/agent/extensions/
 cp retry-level/retry-level.ts        ~/.pi/agent/extensions/
-cp pi-prompt-compat/prompt-compat.ts ~/.pi/agent/extensions/
+
 ```
 
-> `pi-seep-ext` 是**包形式**（多文件 + 依赖），不要手工拷单个文件，用上面的 `pi install`。
+> `pi-seep-ext` 与 `pi-prompt-compat` 都是**多文件包**，不要手工拷单个文件。
+> 提示词插件单装用 `pi install <仓库路径>/plugins/pi/pi-prompt-compat`。
 
 装完**新开一个会话**生效（扩展在会话启动时加载）。
 
@@ -100,3 +101,9 @@ cp -r skills/* ~/.agents/skills/
    - 目录内必须含：入口文件、`README.md`、`package.json`、`LICENSE`
    - 新增后**记得往仓库根 `package.json` 的 `pi.extensions` 里加一行**（否则 `pi install` 装不到它）
    - `README.md` 要写：为什么需要它 / 它做什么 / 怎么装 / 踩过的坑
+
+## Seep 专用源码
+
+Seep 二开版本单独保存在 [seep-workbench](seep-workbench/README.md)，不随根包自动加载。
+已经安装 Seep 的设备按 Seep 的流程更新；不要再叠加本仓库根包中的同名插件。
+这份备份不代替 Seep 的技能、知识库、工具、MCP 与风险账本部署。

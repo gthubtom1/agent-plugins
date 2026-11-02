@@ -3,8 +3,19 @@
 //      PI_HOME=<pi 家目录> node smoke-cmd-guard.mjs   （换机时指定）
 import assert from "node:assert";
 import { createRequire } from "node:module";
-import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
+import { tmpdir } from "node:os";
+// A fresh checkout has no user tool-chain documents; use an explicit fixture.
+const fixture = mkdtempSync(join(tmpdir(), "cmd-guard-smoke-"));
+writeFileSync(join(fixture,"TOOL-CHAIN.md"), "`fixture-gui.exe` -> `fixture-cli`\n");
+process.env.CMD_GUARD_SKILL_ROOT = fixture;
+process.env.RELAB_SKILL_ROOT = fixture;
+process.env.REVERSE_SKILL_ROOT = fixture;
+process.on("exit", () => {
+  assert.equal(dirname(resolve(fixture)), resolve(tmpdir()));
+  rmSync(fixture, {recursive:true, force:true});
+});
 const handlers = new Map();
 const commands = new Map();
 const pi = {
@@ -102,7 +113,7 @@ check("die.exe 被拦（内置表）", () => {
 // 真正的证据是提示语末尾的「（来源 xxx）」标记 —— 内置表的项没有这个标记。
 check("提示语带「来源」标记 = 确实从 TOOL-CHAIN.md 派生来的", () => {
   commands.get("guard").handler("rules", ctx);
-  const t = log.find((l) => l.kind === "notify")?.text || "";
+  const t = log.findLast((l) => l.kind === "notify")?.text || "";
   const derived = t.split("\n").filter((l) => /来源\s+\S+\.md/.test(l));
   assert.ok(derived.length > 0, "一条派生项都没有，文档驱动没生效；rules=\n" + t);
 });
@@ -261,7 +272,7 @@ check("/guard rules 列出派生名目", () => {
   assert.ok(commands.has("guard"));
   log.length = 0;
   commands.get("guard").handler("rules", ctx);
-  const t = log.find((l) => l.kind === "notify")?.text || "";
+  const t = log.findLast((l) => l.kind === "notify")?.text || "";
   assert.match(t, /GUI 名单/);
   assert.match(t, /tshark/, "派生项没列出来");
 });
@@ -280,12 +291,25 @@ check("底栏状态确实被写过（不是空转）", () => {
   log.length = 0;
   const { event } = call("Get-ChildItem C:\\relab2");
   // 命令一开跑就该有底栏状态；命令结束后状态行要收成汇总
-  assert.ok(log.some((l) => l.kind === "status" && /bash/.test(String(l.text))), "起跑时没写状态；log=" + JSON.stringify(log));
+  assert.ok(log.some((l) => l.kind === "status" && /运行中/.test(String(l.text))), "起跑时没写状态；log=" + JSON.stringify(log));
   log.length = 0;
   fire("tool_execution_update", { toolCallId: event.toolCallId }, ctx);
   fire("tool_result", { toolCallId: event.toolCallId, isError: false, content: [] }, ctx);
-  assert.ok(log.some((l) => l.kind === "status" && /guard/.test(String(l.text))), "结束后没收状态");
+  assert.ok(log.some((l) => l.kind === "status" && /⛨|guard/.test(String(l.text))), "结束后没收状态");
 });
 
+check("quoted read-only network config search is not a mutation", () => {
+  const {out} = call('grep "Set-NetIPInterface" fixture.txt');
+  assert.ok(!out);
+});
+check("each SSH segment gets its own timeout", () => {
+  const {event} = call("ssh -o ConnectTimeout=5 a; ssh b");
+  assert.match(event.input.command, /ssh -o ConnectTimeout=5 a; ssh -o ConnectTimeout=15/);
+});
+check("rsync uses its own timeout syntax, not SSH options", () => {
+  const {event} = call("rsync src/ host:dest/");
+  assert.match(event.input.command, /rsync --timeout=15/);
+  assert.doesNotMatch(event.input.command, /-o ConnectTimeout/);
+});
 console.log(`\n${fail === 0 ? "全部通过" : "有失败"}：${pass} 通过 / ${fail} 失败\n`);
 process.exit(fail === 0 ? 0 : 1);

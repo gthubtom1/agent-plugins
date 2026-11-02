@@ -1,0 +1,77 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+function directory(value: string): string {
+  try {
+    const absolute = path.resolve(value);
+    if (!fs.statSync(absolute).isDirectory()) return "";
+    if (fs.existsSync(path.join(absolute, ".project-transaction.json"))) return "";
+    const projectFile = path.join(absolute, "project.json");
+    if (fs.existsSync(projectFile)) {
+      if (fs.statSync(projectFile).size > 65536) return "";
+      const project = JSON.parse(fs.readFileSync(projectFile, "utf8"));
+      // Core projects own a different facts schema and transaction/lock API.
+      // Legacy automatic case events must never be appended to that ledger.
+      if (typeof project?.schema === "string" && project.schema.startsWith("seep-project/")) return "";
+    }
+    return absolute;
+  } catch {
+    return "";
+  }
+}
+
+/** Recheck saved/queued paths: a tool may have initialized Core since binding. */
+export function isLegacyCaseDirectory(value: string): boolean {
+  return !!value && !!directory(value);
+}
+
+/** Pin the file before rechecking: Core publishes facts by atomic replacement. */
+export function appendLegacyCaseLine(value: string, relative: string, line: string): void {
+  if (!isLegacyCaseDirectory(value)) return;
+  const target = path.resolve(value, relative);
+  const local = path.relative(path.resolve(value), target);
+  if (!local || path.isAbsolute(local) || local.split(path.sep).includes("..")) return;
+  const fd = fs.openSync(target, "a");
+  try {
+    // No libuv open/write can run later against newly published Core facts.
+    // If Core replaces the path, this descriptor still owns the old file.
+    if (isLegacyCaseDirectory(value)) fs.writeSync(fd, line.endsWith("\n") ? line : line + "\n");
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** A machine pointer is a candidate, not a binding to every new session. */
+export function resolveCaseDirectory(cwd: string = process.cwd()): string {
+  const explicit = process.env.SEEP_CASE_DIR?.trim();
+  // An invalid explicit binding must not silently select another case.
+  if (explicit) return path.isAbsolute(explicit) ? directory(explicit) : "";
+  const workspace = path.resolve(cwd || process.cwd());
+  const marker = path.join(workspace, ".seep-case");
+  const local = directory(marker);
+  if (local) return local;
+  // A local one-line binding lets the Agent restore an external case without
+  // changing the long-lived host's environment or another session's binding.
+  try {
+    const stat = fs.lstatSync(marker);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4096) return "";
+    const target = fs.readFileSync(marker, "utf8").trim();
+    return path.isAbsolute(target) ? directory(target) : "";
+  } catch (error: any) {
+    if (error?.code !== "ENOENT") return "";
+  }
+  try {
+    const pointer = fs.readFileSync(path.join(os.homedir(), ".seep", "current-case"), "utf8")
+      .split(/\r?\n/).map(line => line.trim()).find(Boolean);
+    if (!pointer || !path.isAbsolute(pointer)) return "";
+    const candidate = directory(pointer);
+    if (!candidate) return "";
+    // A workspace may contain many projects. Mere containment is not a
+    // binding; only being in the case itself can adopt the legacy pointer.
+    const relative = path.relative(fs.realpathSync(workspace), fs.realpathSync(candidate));
+    return relative === "" ? candidate : "";
+  } catch {
+    return "";
+  }
+}

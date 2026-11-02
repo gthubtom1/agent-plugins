@@ -1,6 +1,6 @@
 {
   "name": "agent-plugins",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "多智能体插件库：面向 Pi Coding Agent / Claude Code / Codex / dsh / OpenCode 的插件精选",
   "keywords": [
     "pi-package",
@@ -26,6 +26,11 @@
   "author": "Toti",
   "license": "MIT",
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*"
+  },
+  "scripts": {
+    "test": "node scripts/test.mjs",
+    "test:sdk": "node scripts/test-sdk.mjs"
   }
 }

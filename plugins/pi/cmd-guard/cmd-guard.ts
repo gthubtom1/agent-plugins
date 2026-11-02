@@ -39,6 +39,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /* ────────────────────────────── 配置 ────────────────────────────── */
 
@@ -79,7 +80,7 @@ interface GuardConfig {
 	skillRoot: string | null;
 }
 
-const HERE = __dirname;
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 interface DenyRule {
 	/** 稳定标识，用于统计与 /guard 展示 */
@@ -123,8 +124,12 @@ function isReadOnlySegment(cmd: string, at: number): boolean {
 	// 找到命中位置所在那一段的起点（最近的分隔符）
 	const seps = [before.lastIndexOf("|"), before.lastIndexOf(";"), before.lastIndexOf("&&"),
 		before.lastIndexOf("||"), before.lastIndexOf("\n")];
-	const start = Math.max(0, ...seps) + 1;
-	let seg = cmd.slice(start, at).trim();
+	// 找不到分隔符时 start 必须是 0 —— 旧实现写 `Math.max(0, ...seps) + 1`，
+	// 于是**命令开头那一段**总是被剪掉第一个字符（`grep …` 被看成 `rep …`），
+	// 只读豁免在第一条命令上完全失效：第 5 轮真值表「读类命令→放行」就是被这个 off-by-one 卡住的。
+	const raw = Math.max(-1, ...seps);
+	const start = raw + 1;
+	let seg = cmd.slice(start, at).trim().replace(/^[&]+/, "").trim();
 	// 去掉引号/括号/前缀命令（sudo、env、xargs 等不影响"是否是查看器"的判断：
 	// 只要段内出现了引号包裹，说明命中串是**参数**而不是程序名）
 	if (/^["'`]/.test(seg)) return true;
@@ -324,7 +329,7 @@ function findSkillRoot(configured: string | null): string | null {
 		if (v) candidates.push(v);
 	}
 
-	// 2) 本文件就躺在技能包里 → 从 __dirname 往上数（kernel/extensions/pi/ → 根）
+	// 2) 本文件就躺在技能包里 → 从扩展目录往上数（kernel/extensions/pi/ → 根）
 	//    这是最可靠的一条：只要整包 clone 下来就成立，不依赖任何环境变量。
 	let dir = HERE;
 	for (let i = 0; i < 5; i++) {
@@ -334,17 +339,12 @@ function findSkillRoot(configured: string | null): string | null {
 		dir = up;
 	}
 
-	// 3) 习惯位置（换盘用环境变量覆盖即可）
-	candidates.push("C:/relab2", "C:/relab", "D:/relab2");
-	// 3) 习惯位置。换盘 / 换机器用环境变量覆盖即可，不要往这里堆历史路径 ——
-	//    那是「不许猜路径」纪律要治的病：探一个谁也说不清在哪的目录，
-	//    探到了说不清是哪台机器的，探不到又看不出原因。
-	//    确实装在别处 → 设 RELAB_SKILL_ROOT，或在 rules.json 写 skillRoot / toolChainPaths。
-	candidates.push("C:/relab2", "C:/relab", "D:/relab2");
+	// No machine-specific fallback roots. Configure skillRoot, toolChainPaths,
+	// or CMD_GUARD_SKILL_ROOT (legacy environment aliases remain supported).
 	const seen = new Set<string>();
 	for (const c of candidates) {
 		const abs = path.resolve(c);
-		const key = abs.toLowerCase();
+		const key = process.platform === "win32" ? abs.toLowerCase() : abs;
 		if (seen.has(key)) continue;
 		seen.add(key);
 		if (looksLikeRoot(abs)) return abs;
@@ -430,7 +430,7 @@ function mtimeOf(p: string): string {
 function loadConfig(force = false): void {
 	const now = Date.now();
 	const rp = rulesPath();
-	const stamp = `${mtimeOf(rp)}:${process.env.RELAB_SKILL_ROOT || ""}`;
+	const stamp = `${mtimeOf(rp)}:${["CMD_GUARD_SKILL_ROOT", "RELAB_SKILL_ROOT", "REVERSE_SKILL_ROOT"].map(k => process.env[k] || "").join(":")}`;
 	// 30 秒节流：文件没变就别反复读盘；但 /guard reload 走 force
 	if (!force && stamp === loadedStamp && now - loadedAt < 30_000) return;
 	loadedStamp = stamp;
@@ -466,6 +466,8 @@ function loadConfig(force = false): void {
 		const clean: DenyRule[] = [];
 		for (const r of extra as unknown as DenyRule[]) {
 			if (!r || typeof r !== "object") continue;
+			const id = String((r as DenyRule).id || "");
+			if (id && disabled.has(id)) continue;
 			const re = String((r as DenyRule).re || "");
 			if (!re) continue;
 			try {
@@ -642,18 +644,39 @@ function head(cmd: string, n = 72): string {
 function hardenSsh(cmd: string, shell: "bash" | "powershell"): { cmd: string; injected: string[] } {
 	const injected: string[] = [];
 	// 只在「真命令位置」注入，否则 echo "ssh is old" 会被改写（这个坑踩过）
-	const SEG = /(^|[\n;|&(]\s*)((?:[\w.]+=\S+\s+)*)((?:ssh|scp|sftp|rsync))\b/gi;
-	const already = /ConnectTimeout/i.test(cmd);
-	let touched = false;
+	const SEG =
+		/(^|[\n;|&(]\s*)((?:[\w.]+=\S+\s+)*(?:(?:sudo|doas|nohup|command|exec)\s+)*)((?:ssh|scp|sftp))\b/gi;
+	let sshChanged = false;
+	let rsyncChanged = false;
 
-	let out = cmd.replace(SEG, (m, lead: string, envPrefix: string, word: string) => {
-		touched = true;
-		if (already) return m;
-		return lead + envPrefix + word + " -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3";
-	});
-	if (touched && !already) injected.push("ssh/scp: ConnectTimeout=15 + ServerAlive 心跳");
+	const tailOfSegment = (whole: string, offset: number, matched: string): string =>
+		whole.slice(offset + matched.length).split(/&&|\|\||[;\n|]/, 1)[0] || "";
 
-	const hasRealSsh = /(^|[\n;|&(]\s*)((?:[\w.]+=\S+\s+)*)(?:ssh)\b/i.test(cmd);
+	let out = cmd.replace(
+		SEG,
+		(m: string, lead: string, envPrefix: string, word: string, offset: number, whole: string) => {
+			// 逐段判断：`ssh -o ConnectTimeout=5 a; ssh b` 不能因为第一段已有配置，
+			// 就放过第二段无限等待的 ssh。
+			if (/(?:^|\s)-o\s*ConnectTimeout(?:=|\s)/i.test(tailOfSegment(whole, offset, m))) return m;
+			sshChanged = true;
+			return lead + envPrefix + word + " -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3";
+		},
+	);
+
+	// rsync 不接受 SSH 的 `-o`；它的有界参数是 `--timeout`。
+	out = out.replace(
+		/(^|[\n;|&(]\s*)((?:[\w.]+=\S+\s+)*(?:(?:sudo|doas|nohup|command|exec)\s+)*)(rsync)\b/gi,
+		(m: string, lead: string, envPrefix: string, word: string, offset: number, whole: string) => {
+			if (/(?:^|\s)--timeout(?:=|\s+)/i.test(tailOfSegment(whole, offset, m))) return m;
+			rsyncChanged = true;
+			return lead + envPrefix + word + " --timeout=15";
+		},
+	);
+	if (sshChanged) injected.push("ssh/scp/sftp: 缺失的 ConnectTimeout=15 + ServerAlive 心跳已补齐");
+	if (rsyncChanged) injected.push("rsync: 缺失的 --timeout=15 已补齐");
+
+	const hasRealSsh =
+		/(^|[\n;|&(]\s*)((?:[\w.]+=\S+\s+)*(?:(?:sudo|doas|nohup|command|exec)\s+)*)(?:ssh)\b/i.test(cmd);
 	if (shell === "bash" && hasRealSsh && !/<\s*\//.test(out)) {
 		out = out + " < /dev/null";
 		injected.push("ssh: </dev/null 断交互");

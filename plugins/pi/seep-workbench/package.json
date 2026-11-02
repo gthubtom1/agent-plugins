@@ -1,0 +1,25 @@
+{
+  "name": "pi-seep-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Opt-in Seep workbench integration source; requires Seep deployment, not included by root installer",
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./extensions/answer-gate.ts",
+      "./extensions/cmd-guard.ts",
+      "./extensions/load-system-prompt.ts",
+      "./extensions/retry-level.ts",
+      "./extensions/security-audit-interceptor.ts",
+      "./extensions/seep-circuit.ts",
+      "./extensions/seep-events.ts",
+      "./extensions/seep-memory.ts",
+      "./packages/pi-seep-ext/extensions/persona.ts",
+      "./packages/pi-seep-ext/extensions/rewind.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*"
+  }
+}

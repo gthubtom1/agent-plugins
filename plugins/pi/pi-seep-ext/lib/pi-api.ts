@@ -109,7 +109,7 @@ export interface CustomMessageInput {
 export interface ExtensionApi {
   on(event: "session_start", handler: (event: unknown, ctx: BaseContext) => void | Promise<void>): void;
   on(event: "before_agent_start", handler: (event: BeforeAgentStartEvent, ctx: BaseContext) => BeforeAgentStartResult | undefined | void): void;
-  on(event: "context_with_system", handler: (event: ContextWithSystemEvent, ctx: BaseContext) => void | undefined): void;
+  on(event: "context_with_system", handler: (event: ContextWithSystemEvent, ctx: BaseContext) => { messages: ContextMessage[] } | void | undefined): void;
   on(event: "context", handler: (event: ContextEvent, ctx: BaseContext) => { messages: ContextMessage[] } | undefined | void): void;
   registerCommand(name: string, options: {
     description?: string;

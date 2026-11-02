@@ -161,7 +161,7 @@ test("the picker's mode row switches the injection mode instead of picking a per
   const { api, commands, appended } = fakePi();
   personaExtension(api);
 
-  const ctx = fakeContext({ select: ["⚙ 注入模式（当前 cached）", "● every-turn（每轮强制写进系统提示词）"] });
+  const ctx = fakeContext({ select: ["⚙ 注入模式（当前 cached）", "every-turn（每次模型请求重放完整系统提示词与当前人设）"] });
   await commands.get("persona").handler("", ctx);
 
   assert.deepEqual(appended, [], "a mode change must not pick a persona");
@@ -198,8 +198,8 @@ test("cached mode writes the persona as prompt sections", () => {
   const event = { systemPrompt: "基础提示词", systemPromptOptions: {} };
   handlers.get("before_agent_start")[0](event, ctx);
 
-  assert.equal(event.systemPromptOptions.sections.personality, "<personality>\n你是破甲助手\n</personality>");
-  assert.equal(event.systemPromptOptions.sections["generic-rules"], "<generic-rules>\n全局规则\n</generic-rules>");
+  assert.equal(event.systemPromptOptions.sections.personality, "你是破甲助手");
+  assert.equal(event.systemPromptOptions.sections["generic-rules"], undefined, "rules belong to the prompt plugin");
   assert.equal(event.systemPrompt, "基础提示词", "cached mode must not rewrite the prompt text");
 });
 
@@ -241,23 +241,24 @@ test("a session that never used this extension cannot delete another extension's
   );
 });
 
-test("every-turn mode forces the persona into the prompt and keeps exactly one identity", () => {
-  makeAgentDir({ 破甲v2: "你是破甲助手" }, { rules: "全局规则", mode: "every-turn" });
+test("every-turn waits for all prompt hooks before replaying the full checkpoint", () => {
+  makeAgentDir({ card: "PERSONA" }, { mode: "every-turn" });
   const { api, handlers } = fakePi();
   personaExtension(api);
-
-  const ctx = fakeContext({ branch: [personaEntry("破甲v2")] });
-  const event = {
-    systemPrompt: "<personality>\n来自 PERSONALITY.md\n</personality>\n\n基础提示词",
-    systemPromptOptions: { sections: { personality: "<personality>\n旧的\n</personality>" } },
-  };
-  const result = handlers.get("before_agent_start")[0](event, ctx);
-
-  assert.ok(result && typeof result.systemPrompt === "string");
-  assert.equal(result.systemPrompt.split("<personality>").length - 1, 1);
-  assert.match(result.systemPrompt, /你是破甲助手/);
-  assert.doesNotMatch(result.systemPrompt, /来自 PERSONALITY\.md/);
-  assert.equal("personality" in event.systemPromptOptions.sections, false, "the cached copy must be released");
+  const ctx = fakeContext({ branch: [personaEntry("card")] });
+  const event = { systemPrompt: "BASE", systemPromptOptions: { sections: { other: "KEEP" } } };
+  assert.equal(handlers.get("before_agent_start")[0](event, ctx), undefined);
+  assert.equal(event.systemPromptOptions.sections.personality, "PERSONA");
+  const messages = [{ role: "system", content: "BASE", timestamp: 1, sections: { other: "KEEP" } },
+    { role: "user", content: "literal <personality>KEEP</personality>" },
+    { role: "system", content: "", timestamp: 2, sections: { later: "LATE" } }];
+  const result = handlers.get("context_with_system")[0]({ messages }, ctx);
+  assert.equal(result.messages.filter(m => m.role === "system").length, 1);
+  assert.equal(result.messages[0].sections.other, "KEEP");
+  assert.equal(result.messages[0].sections.later, "LATE");
+  assert.equal(result.messages[0].sections.personality, "<personality>\nPERSONA\n</personality>");
+  assert.deepEqual(result.messages[1], messages[1]);
+  assert.equal(handlers.has("context"), false, "conversation content must never be scrubbed");
 });
 
 test("the context_with_system guard puts the sections back after a compaction, and removes them when cleared", () => {
@@ -272,7 +273,7 @@ test("the context_with_system guard puts the sections back after a compaction, a
 
   const cleared = fakeContext({ branch: [personaEntry(null)] });
   handlers.get("context_with_system")[0](event, cleared);
-  assert.equal("personality" in event.messages[0].sections, false);
+  assert.equal(event.messages[0].sections.personality, null, "explicit removal is a transcript delta");
 });
 
 test("the rewind extension targets the chosen message and refills the composer", async () => {
@@ -430,7 +431,7 @@ test("a persona picked after the rewind point still wins after rewinding", () =>
 
   assert.equal(
     event.systemPromptOptions.sections.personality,
-    ["<personality>", "你是小码酱", "</personality>"].join("\n"),
+    "你是小码酱",
   );
 });
 

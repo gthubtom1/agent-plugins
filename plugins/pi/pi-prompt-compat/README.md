@@ -39,13 +39,13 @@
 
 ## 🚀 安装方式
 
-### 方式一：复制到全局扩展目录（推荐）
-将本目录直接拷贝至 `~/.pi/agent/extensions/omp-prompt-compat/`：
+### 方式一：安装完整本地包（推荐）
 
 ```bash
-# Windows
-Copy-Item -Recurse plugins/pi/pi-prompt-compat "$HOME\.pi\agent\extensions\omp-prompt-compat"
+pi install <仓库路径>/plugins/pi/pi-prompt-compat
 ```
+
+保留同目录的 `lib/`。不要只复制 `.ts` 文件，也不要同时加载 Seep 的提示词扩展。
 
 ### 方式二：运行时按需加载
 ```bash
@@ -64,3 +64,15 @@ pi --extension plugins/pi/pi-prompt-compat/index.ts
 | `pi ... --rules-debug` | 命令行参数，启动时开启每轮 LLM 请求的拦截校验日志 |
 
 *(注：同时支持 `/omp-status`、`/omp-reload`、`/omp-debug` 别名)*
+
+## Seep 回流修复（2026-11-02）
+
+- 与 `pi-seep-ext` 的显式人设、关闭和目录默认选择保持一致，加载顺序不影响生效；不会把关闭的人设补回来。
+- 每次模型请求按当前会话重新读文件，工具续轮也能更新/删除规则；修复最后一个系统增量，而非被后续增量覆盖的首条消息。
+- 自定义 agent 目录支持 `~/`；仅修复命名系统段，不改用户、助手、工具结果和附件。
+- **保留本插件原有的全局 + 项目规则叠加语义**；与 Seep 的项目优先选一份不同，不要两者同时加载。
+- 包内 `lib/` 是必需依赖；不能只复制 `prompt-compat.ts` 一个文件。根安装清单已经按包内路径加载。
+- 本插件不注入 Seep 专业规则、能力提醒或凭据边界；需要完整 Seep 时使用 Seep 安装器。
+
+本机路径写死的旧冒烟入口已换为可移植入口。真实 SDK 验证：
+`node scripts/test-sdk.mjs <pi-coding-agent 包目录> --standalone`（从仓库根执行）。

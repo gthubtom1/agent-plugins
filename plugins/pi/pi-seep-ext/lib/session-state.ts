@@ -1,13 +1,11 @@
-import type { PersonaInjectMode } from "./personas.ts";
+import { readPersonaText, readSettings, type PersonaInjectMode, type PersonaSettings } from "./personas.ts";
 
 /**
  * Per-conversation persona, stored in the conversation itself.
  *
- * A session entry (`custom`, `pi-seep-ext:persona`) is append-only and follows
- * the branch, which is exactly the semantics a per-conversation identity needs:
- * two conversations never see each other's persona, rewinding past a switch
- * restores the persona that was in force there, and nothing outside the session
- * file has to be kept in sync.
+ * Persona choices are conversation settings. Read all append-only entries in
+ * append order, including entries outside the active branch: rewinding a turn
+ * must not resurrect a persona that the user has since switched off.
  */
 export const PERSONA_STATE_TYPE = "pi-seep-ext:persona";
 
@@ -36,7 +34,7 @@ interface EntryLike {
   data?: unknown;
 }
 
-/** The persona recorded in this branch, or `undefined` when it was never set. */
+/** The last explicit choice, or `undefined` when it was never set. */
 export function readPersonaState(entries: readonly EntryLike[]): string | null | undefined {
   let current: string | null | undefined;
   for (const entry of entries) {
@@ -49,4 +47,20 @@ export function readPersonaState(entries: readonly EntryLike[]): string | null |
     else if (typeof personaId === "string" && personaId.length > 0) current = personaId;
   }
   return current;
+}
+
+/**
+ * Shared precedence with load-system-prompt: explicit choice (including off or
+ * a missing selected card), then a usable directory default, then legacy.
+ * `undefined` leaves PERSONALITY.md in charge; `null` explicitly suppresses it.
+ */
+export function resolvePersonaSelection(
+  agentDir: string,
+  entries: readonly EntryLike[],
+  settings: PersonaSettings = readSettings(agentDir),
+): string | null | undefined {
+  const recorded = readPersonaState(entries);
+  if (recorded !== undefined) return recorded && readPersonaText(agentDir, recorded) ? recorded : null;
+  if (entries.some((entry) => entry.type === "custom" && isPersonaStateType(entry.customType))) return null;
+  return settings.defaultId && readPersonaText(agentDir, settings.defaultId) ? settings.defaultId : undefined;
 }

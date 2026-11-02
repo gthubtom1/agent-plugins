@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveAgentDir } from "./agent-dir.ts";
 
@@ -148,14 +149,17 @@ export function readSettings(agentDir: string = resolveAgentDir()): PersonaSetti
 
 /** Merge `patch` into the settings file, keeping keys this version does not know. */
 export function writeSettings(patch: Record<string, unknown>, agentDir: string = resolveAgentDir()): PersonaSettings {
-  const current = readSettings(agentDir);
   let stored: Record<string, unknown> = {};
   try {
-    const parsed = JSON.parse(readFileSync(settingsPath(agentDir), "utf8")) as unknown;
-    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-      stored = parsed as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(readFileSync(settingsPath(agentDir), "utf8"));
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("personas.json must contain an object");
     }
-  } catch { /* no file yet */ }
+    stored = parsed as Record<string, unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const current = normalizeSettings(stored);
 
   const next: PersonaSettings = {
     mode: patch.mode === undefined ? current.mode : asMode(patch.mode),
@@ -163,10 +167,16 @@ export function writeSettings(patch: Record<string, unknown>, agentDir: string =
     showBadge: patch.showBadge === undefined ? current.showBadge : patch.showBadge === true,
   };
   const merged = { ...stored, ...patch, mode: next.mode, defaultId: next.defaultId, showBadge: next.showBadge };
+  const temporary = `${settingsPath(agentDir)}.${randomUUID()}.tmp`;
   try {
     mkdirSync(agentDir, { recursive: true });
-    writeFileSync(settingsPath(agentDir), `${JSON.stringify(merged, null, 2)}\n`, "utf8");
-  } catch { /* read-only agent dir: the caller still gets the effective values */ }
+    writeFileSync(temporary, `${JSON.stringify(merged, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    renameSync(temporary, settingsPath(agentDir));
+  } finally {
+    try { unlinkSync(temporary); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
   return next;
 }
 

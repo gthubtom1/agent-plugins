@@ -180,14 +180,16 @@ test("a QR matrix renders as half blocks, one character per module", () => {
 });
 
 test("the encoder is optional: its absence costs the code, not the extension", async () => {
-  // The package is installed for development, so the code path that matters here
-  // is the one that succeeds; the fallback is exercised by the caller's null check.
-  assert.equal(await qrAvailable(), true);
+  const available = await qrAvailable();
   const block = await renderQrBlock("http://100.64.0.7:30141");
-  assert.ok(block);
-  assert.ok(block.startsWith("```text\n"));
-  assert.ok(block.endsWith("\n```"));
-  assert.equal(block.split("\n").length > 12, true);
+  if (available) {
+    assert.ok(block);
+    assert.ok(block.startsWith("```text\n"));
+    assert.ok(block.endsWith("\n```"));
+    assert.equal(block.split("\n").length > 12, true);
+  } else {
+    assert.equal(block, null, "missing optional encoder must not break the extension");
+  }
 
   const matrix = qrMatrix(
     (typeNumber, level) => {
