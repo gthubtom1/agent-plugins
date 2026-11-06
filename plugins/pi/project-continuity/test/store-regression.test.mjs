@@ -108,7 +108,7 @@ test('explicit uninitialized child root never borrows the ancestor marker', asyn
   const cwd = path.join(inner, 'src');
   await fsp.mkdir(cwd, { recursive: true });
   const resolved = await resolveProject(cwd, { root: inner });
-  assert.equal(resolved.root, inner);
+  assert.equal(resolved.root, await fsp.realpath(inner));
   assert.equal(resolved.exists, false);
   assert.equal(resolved.markerFound, false);
   assert.equal(resolved.projectId, undefined);
