@@ -54,6 +54,7 @@ export const DEFAULT_STATUS = Object.freeze({
 });
 
 const CONTEXT_KEYS = ['caseRoot', 'branch', 'targetSha256', 'method', 'config', 'question'];
+const SCOPED_KINDS = new Set(['observation', 'claim', 'attempt', 'artifact']);
 const TOMBSTONE_STATUS = ['superseded', 'cancelled', 'retired', 'rejected'];
 const FATAL_ISSUES = new Set(['TAMPER', 'PARSE_ERROR', 'CORRUPT', 'SOURCE_ESCAPE', 'STATE_ESCAPE']);
 
@@ -94,8 +95,9 @@ function nowVal(clock) {
   return new Date().toISOString();
 }
 
-// Stable logical id: ASCII stays as a readable slug; non-ASCII (e.g. Chinese)
-// becomes a deterministic truncated hash for filenames; collisions remain possible.
+// Stable logical id: keep simple ASCII ids readable. Inputs that lose
+// characters during normalization or exceed the readable limit use a hash so
+// distinct raw ids such as `case/A` and `case-A` cannot silently collide.
 function slugify(str) {
   return String(str || '')
     .toLowerCase()
@@ -108,10 +110,10 @@ function encodeId(str) {
   const s = String(str).trim();
   if (s === '') return 'item';
   const norm = s.toLowerCase().normalize('NFKC');
-  // pure-ASCII -> readable slug; any non-ASCII rune (e.g. Chinese) -> stable hash
+  const slug = slugify(norm);
   let ascii = true;
   for (let i = 0; i < norm.length; i++) { if (norm.charCodeAt(i) > 127) { ascii = false; break; } }
-  if (ascii) return slugify(norm);
+  if (ascii && norm.length <= 80 && !/[\\/]/.test(norm)) return slug;
   return 'id-' + createHash('sha256').update(s).digest('hex').slice(0, 24);
 }
 
@@ -439,6 +441,7 @@ export async function adoptProject(root, opts = {}) {
       // someone else adopted; fine
     } else {
       pf2.workspaceKey = key2;
+      pf2.root = rootAbs;
       pf2.adoptedAt = nowVal(opts._now);
       await writeFileAtomic(file, JSON.stringify(pf2, null, 2) + '\n');
     }
@@ -797,11 +800,13 @@ async function readJournal(changesDir, projectId, workspaceKey) {
     const last = entry.history[entry.history.length - 1];
     entry.current = last;
     entry.file = last.file;
-    // historical aliases union (so a dropped alias remains discoverable)
+    // Historical aliases and titles remain searchable after a rename.
     entry.allAliases = [];
+    entry.allTitles = [];
     for (const h of entry.history) {
-      const a = h.change.record && h.change.record.aliases || [];
-      for (const x of a) if (!entry.allAliases.includes(x)) entry.allAliases.push(x);
+      const previous = h.change.record || {};
+      for (const x of previous.aliases || []) if (!entry.allAliases.includes(x)) entry.allAliases.push(x);
+      if (previous.title && !entry.allTitles.includes(previous.title)) entry.allTitles.push(previous.title);
     }
   }
   // The latest tombstone owns its replacement link. Historical edges must not
@@ -845,6 +850,7 @@ function recordObject(entry) {
     tombstone,
     aliases: c.aliases || [],
     allAliases: entry.allAliases || [],
+    allTitles: entry.allTitles || [],
     source: c.source || { path: '' },
     context: c.context || {},
     reason: c.reason,
@@ -1073,6 +1079,18 @@ export async function saveRecord(root, input, opts = {}) {
       fail('Cannot save: changes journal is corrupt (tampered/gapped). Fix issues first.', 'CORRUPT_JOURNAL');
     }
     const { byId } = j;
+    if (byId.get(rec.id)?.current?.change?.record?.status === 'cancelled' && rec.status !== 'cancelled') {
+      fail('A cancelled decision is terminal; use a new id for a new proposal.', 'CANCELLED_TERMINAL');
+    }
+    const incomingAliases = new Set(rec.aliases || []);
+    for (const [otherId, entry] of byId) {
+      if (otherId === rec.id) continue;
+      const conflict = (entry.allAliases || []).find((alias) => incomingAliases.has(alias));
+      if (conflict) fail(`alias is already used by logical id ${otherId}: ${conflict}`, 'ALIAS_CONFLICT');
+    }
+    if (byId.has(rec.id) && byId.get(rec.id).current.change.record.id !== rec.id) {
+      fail(`logical id collision for ${rec.id}; choose a different id`, 'ID_COLLISION');
+    }
     if (rec.supersedes && !byId.has(rec.supersedes)) {
       fail(`cannot supersede unknown logical id: ${rec.supersedes}`, 'TARGET_UNKNOWN');
     }
@@ -1186,12 +1204,27 @@ export async function saveRecord(root, input, opts = {}) {
 // ---------------------------------------------------------------------------
 // lookup
 // ---------------------------------------------------------------------------
-function ctxCompatible(recordCtx, filterCtx) {
+function ctxCompatible(record, filterCtx) {
+  const recordCtx = record?.context || {};
+  const scoped = SCOPED_KINDS.has(record?.kind);
+  const has = (value) => value !== undefined && value !== null && value !== '';
   for (const key of CONTEXT_KEYS) {
     const fv = filterCtx && filterCtx[key];
-    if (fv === undefined || fv === null || fv === '') continue;
-    const rv = recordCtx && recordCtx[key];
-    if (rv && rv !== String(fv)) return false; // specified + exists + mismatch => incompatible
+    const rv = recordCtx[key];
+    const selected = has(fv);
+    const recorded = has(rv);
+    if (selected && recorded && rv !== String(fv)) return false;
+    // A scoped technical fact without the selected identity is not a global
+    // fact. Likewise, a bound fact is hidden when the current identity is
+    // unknown; callers can explicitly query it after establishing identity.
+    if (scoped && ['caseRoot', 'branch'].includes(key)) {
+      if (selected && !recorded) return false;
+      if (!selected && recorded) return false;
+    }
+    if (scoped && key === 'targetSha256') {
+      if (selected && !recorded) return false;
+      if (!selected && recorded && has(filterCtx?.caseRoot)) return false;
+    }
   }
   return true;
 }
@@ -1199,7 +1232,7 @@ function ctxCompatible(recordCtx, filterCtx) {
 function matchQuery(rec, q) {
   if (!q) return true;
   const ql = String(q).toLowerCase();
-  const hay = [(rec.allAliases || []).join(' '), rec.id, rec.title, rec.text, rec.kind,
+  const hay = [(rec.allAliases || []).join(' '), (rec.allTitles || []).join(' '), rec.id, rec.title, rec.text, rec.kind,
     rec.status, (rec.aliases || []).join(' '), rec.reason || ''].join(' ').toLowerCase();
   return hay.includes(ql);
 }
@@ -1207,7 +1240,7 @@ function matchQuery(rec, q) {
 function aliasOrIdMatch(rec, want) {
   const wl = String(want).toLowerCase();
   if (rec.id === encodeId(want)) return true;
-  for (const a of rec.allAliases || []) if (String(a).toLowerCase() === wl) return true;
+  for (const a of [...(rec.allAliases || []), ...(rec.allTitles || [])]) if (String(a).toLowerCase() === wl) return true;
   return false;
 }
 
@@ -1243,12 +1276,15 @@ export async function lookup(root, opts = {}) {
     const current = resolveToCurrent(rec, allById);
     if (seen.has(current.id)) continue;
     seen.add(current.id);
-    if (!ctxCompatible(current.context, filterCtx)) {
+    if (!ctxCompatible(current, filterCtx)) {
       if (incompatible.length < Math.min(limit, 50)) {
         incompatible.push({ id: current.id, reason: 'context mismatch',
-          mismatchedKeys: CONTEXT_KEYS.filter((key) => filterCtx?.[key] !== undefined &&
-            filterCtx[key] !== null && filterCtx[key] !== '' && current.context?.[key] &&
-            current.context[key] !== String(filterCtx[key])) });
+          mismatchedKeys: CONTEXT_KEYS.filter((key) => {
+            const selected = filterCtx?.[key] !== undefined && filterCtx[key] !== null && filterCtx[key] !== '';
+            const recorded = current.context?.[key] !== undefined && current.context[key] !== null && current.context[key] !== '';
+            return (selected && recorded && current.context[key] !== String(filterCtx[key])) ||
+              (SCOPED_KINDS.has(current.kind) && ['caseRoot', 'branch', 'targetSha256'].includes(key) && selected !== recorded);
+          }) });
       }
       continue;
     }
@@ -1270,6 +1306,8 @@ export async function lookup(root, opts = {}) {
       record: item.record,
       current: item.current,
       staleSource: stale,
+      needsReview: stale && !item.current.tombstone,
+      effectiveStatus: stale && !item.current.tombstone ? 'needs-review' : item.current.status,
       history: history ? (await historyOf(journal, item.record.id)) : undefined,
     });
   }
@@ -1363,33 +1401,41 @@ export async function renderRecovery(root, opts = {}) {
   }
   R.add(`Project memory: ${st.project.projectId} (rev ${st.revision})`);
   const filterCtx = opts.context && typeof opts.context === 'object' ? opts.context : null;
-  const relevant = st.records.filter((r) => ctxCompatible(r.context, filterCtx));
-  const tombs = relevant.filter((r) => r.tombstone);
-  const constraints = relevant.filter((r) => !r.tombstone && (r.kind === 'decision' || r.kind === 'context'));
+  const relevant = st.records.filter((r) => ctxCompatible(r, filterCtx));
+  const tombs = relevant.filter((r) => r.tombstone).sort((a, b) => b.projectRevision - a.projectRevision);
+  const constraints = relevant.filter((r) => !r.tombstone && (r.kind === 'decision' || r.kind === 'context')).sort((a, b) => b.projectRevision - a.projectRevision);
   const others = relevant.filter((r) => !r.tombstone && r.kind !== 'decision' && r.kind !== 'context')
-    .filter((r) => !opts.query || matchQuery(r, opts.query));
+    .filter((r) => !opts.query || matchQuery(r, opts.query))
+    .sort((a, b) => b.projectRevision - a.projectRevision);
 
   // Compact tombstones and constraint pointers precede all explanatory text and
   // ordinary facts. Never print a record's body without its status/id context.
   const core = [];
   for (const r of [...tombs, ...constraints]) {
     const stale = await markStale(rootAbs, r);
-    const flags = stale ? ' {SOURCE STALE/MISSING}' : '';
+    const flags = stale && !r.tombstone ? ' {SOURCE STALE/MISSING; NEEDS REVIEW}' : '';
     const link = r.supersededBy ? ` -> current: ${r.supersededBy}` : '';
-    const pointer = `- [${r.status}] (${r.id})${flags}${link}`;
-    if (R.add(`${pointer} ${r.title}`, `${pointer} [details omitted]`)) core.push(r);
+    const status = stale && !r.tombstone ? 'needs-review' : r.status;
+    const pointer = `- [${status}] (${r.id})${flags}${link}`;
+    if (R.add(`${pointer} ${r.title}`, `${pointer} [details omitted]`)) core.push({ record: r, stale });
   }
-  for (const r of core) {
+  for (const item of core) {
+    const r = item.record;
+    if (item.stale && !r.tombstone) {
+      R.add(`(${r.id}) [needs-review] source changed or is missing; do not use the old text as current proof.`);
+      continue;
+    }
     const details = [r.reason && `reason: ${r.reason}`, r.text,
       r.source?.path && `source: ${r.source.path}`].filter(Boolean).join('\n');
     if (details) R.add(`(${r.id}) [${r.status}]\n${details}`);
   }
   for (const r of others) {
     const stale = await markStale(rootAbs, r);
-    const flags = [r.kind === 'claim' && 'NOT verified (candidate)', stale && 'SOURCE STALE/MISSING'].filter(Boolean);
+    const flags = [r.kind === 'claim' && 'NOT verified (candidate)', stale && 'SOURCE STALE/MISSING; NEEDS REVIEW'].filter(Boolean);
+    const status = stale ? 'needs-review' : r.status;
     const conditions = r.kind === 'attempt'
       ? `\nAttempt conditions: ${Object.entries(r.context).map(([k, v]) => `${k}=${v}`).join(', ') || 'unspecified; not a general prohibition'}` : '';
-    const block = `- [${r.status}] (${r.id}) ${r.title}${flags.length ? ' {' + flags.join('; ') + '}' : ''}${conditions}` +
+    const block = `- [${status}] (${r.id}) ${r.title}${flags.length ? ' {' + flags.join('; ') + '}' : ''}${conditions}` +
       (r.reason ? `\nreason: ${r.reason}` : '') + (r.source?.path ? `\nsource: ${r.source.path}` : '');
     R.add(block);
   }

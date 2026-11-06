@@ -203,7 +203,7 @@ test('failed attempt only applies under matching method, config and question; re
     assert.deepEqual((await lookup(root, { id: 'attempt', context: changed })).records, []);
     assert.ok(!(await renderRecovery(root, { context: changed })).includes('header timeout'));
   }
-  const recovery = await renderRecovery(root);
+  const recovery = await renderRecovery(root, { context });
   assert.match(recovery, /Attempt conditions:.*method=parser.*config=budget=10.*question=decode header/);
 });
 
@@ -463,6 +463,54 @@ test('adopting a corrupt copied journal preserves marker identity and every orig
   assert.equal(await fsp.readFile(changeFile, 'utf8'), '{broken');
   assert.equal((await readState(root)).corrupt, false);
 });
+
+test('canonical ids reject normalization collisions and aliases cannot cross logical records', async () => {
+  const root = await project('id-collision');
+  await save(root, 'case-A', { aliases: ['shared-name'] });
+  await save(root, 'case/A', { aliases: ['other-name'] });
+  assert.equal((await readState(root)).records.length, 2);
+  await assert.rejects(save(root, 'third', { aliases: ['shared-name'] }), { code: 'ALIAS_CONFLICT' });
+});
+
+test('cancelled decision is terminal and old title remains searchable', async () => {
+  const root = await project('cancel-terminal');
+  await save(root, 'role', { title: 'Old reviewer', aliases: ['old-role'] });
+  await save(root, 'role', { title: 'Reviewer cancelled', status: 'cancelled', reason: 'withdrawn' });
+  await assert.rejects(save(root, 'role', { title: 'Reviewer revived', status: 'accepted' }), { code: 'CANCELLED_TERMINAL' });
+  for (const selector of [{ id: 'Old reviewer' }, { query: 'Old reviewer' }, { id: 'old-role' }]) {
+    const found = await lookup(root, selector);
+    assert.equal(found.records[0].record.status, 'cancelled');
+  }
+});
+
+test('target-bound technical records stay hidden until the target identity is selected', async () => {
+  const root = await project('target-bound');
+  await save(root, 'sample-a-fact', { kind: 'claim', status: 'candidate', context: { caseRoot: 'work/a', targetSha256: 'sample-a' }, text: 'A-only evidence' });
+  assert.deepEqual((await lookup(root, { context: { caseRoot: 'work/a' } })).records, []);
+  assert.deepEqual((await lookup(root, { context: { caseRoot: 'work/a', targetSha256: 'sample-b' } })).records, []);
+  const right = await lookup(root, { context: { caseRoot: 'work/a', targetSha256: 'sample-a' } });
+  assert.equal(right.records[0].current.id, 'sample-a-fact');
+});
+
+test('stale technical records are marked needs-review and their old body is withheld from recovery', async () => {
+  const root = await project('stale-needs-review');
+  await save(root, 'fact', { kind: 'claim', status: 'candidate', context: { targetSha256: 'sample-a' }, text: 'OLD PROOF' });
+  await fsp.writeFile(path.join(root, 'source.md'), 'changed evidence');
+  const found = await lookup(root, { context: { targetSha256: 'sample-a' } });
+  assert.equal(found.records[0].needsReview, true);
+  assert.equal(found.records[0].effectiveStatus, 'needs-review');
+  assert.doesNotMatch(await renderRecovery(root, { context: { targetSha256: 'sample-a' } }), /OLD PROOF/);
+});
+
+test('detached git identity is distinct from named branch recovery', async () => {
+  const root = await project('detached-identity');
+  await fsp.mkdir(path.join(root, '.git'), { recursive: true });
+  // A real repository is used by the runtime in the host test; store context
+  // filtering here proves the detached identity contract independently.
+  await save(root, 'branch-fact', { kind: 'claim', status: 'candidate', context: { branch: 'main', targetSha256: 'sample' }, text: 'main-only' });
+  assert.deepEqual((await lookup(root, { context: { branch: 'detached:abc', targetSha256: 'sample' } })).records, []);
+});
+
 
 test('hard-linked project marker is rejected before reading or overwriting it', async () => {
   const root = await project('hardlinked-marker');

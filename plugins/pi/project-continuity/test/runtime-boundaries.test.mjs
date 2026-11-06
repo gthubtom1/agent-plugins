@@ -70,22 +70,25 @@ test('ambiguous reverse cases require scope for technical records and skip autom
   h.entries.push({ type: 'message', id: 'a1', message: { role: 'assistant', content: [{ type: 'text', text: '两个案例都成功了（未验证）' }] } });
   await h.event('agent_settled', { aborted: false });
   assert.equal(JSON.parse(text(await h.call('continuity_status', {}))).revision, 1);
-  await h.call('continuity_save', { expectedRevision: 1, record: { ...record, context: { caseRoot: 'work/a' } } });
-  assert.equal(JSON.parse(text(await h.call('continuity_search', { id: 'candidate', context: { caseRoot: 'work/a' } }))).records.length, 1);
+  await h.call('continuity_save', { expectedRevision: 1, record: { ...record, context: { caseRoot: 'work/a', targetSha256: 'sample-a' } } });
+  assert.equal(JSON.parse(text(await h.call('continuity_search', { id: 'candidate', context: { caseRoot: 'work/a', targetSha256: 'sample-a' } }))).records.length, 1);
 });
 
-test('automatic tool failures retain method and argument identity without guessing root cause', async t => {
+test('automatic tool failures pair start arguments and preserve parallel failures', async t => {
   const h = await harness(t);
   await h.call('continuity_save', { expectedRevision: 0, record: decision('goal') });
   await h.event('before_agent_start', { prompt: '解析样本', systemPrompt: 'base' });
-  await h.event('tool_execution_end', { toolName: 'analyze', toolCallId: 'c1', args: { target: 'a.bin', timeout: 5 }, isError: true, result: { content: [{ type: 'text', text: 'timeout' }] } });
+  for (const [call, tool, args] of [['c1', 'analyze', { target: 'a.bin', timeout: 5 }], ['c2', 'decode', { target: 'b.bin', mode: 'static' }]]) {
+    await h.event('tool_execution_start', { toolName: tool, toolCallId: call, args });
+    await h.event('tool_execution_end', { toolName: tool, toolCallId: call, isError: true, result: { content: [{ type: 'text', text: 'timeout' }] } });
+  }
   await h.event('agent_settled', { aborted: false });
   const search = JSON.parse(text(await h.call('continuity_search', { query: '工具失败' })));
-  const record = search.records[0].current;
-  assert.equal(record.status, 'failed');
-  assert.equal(record.context.method, 'analyze');
-  assert.match(record.context.config, /^[a-f0-9]{64}$/);
-  assert.equal(record.context.question, '解析样本');
+  assert.equal(search.records.length, 2);
+  const byMethod = new Map(search.records.map((item) => [item.current.context.method, item.current]));
+  assert.equal(byMethod.get('decode').context.question, '解析样本');
+  assert.equal(byMethod.get('analyze').context.question, '解析样本');
+  assert.notEqual(byMethod.get('decode').context.config, byMethod.get('analyze').context.config);
 });
 
 test('large history replies remain complete JSON with current cancelled status', async t => {

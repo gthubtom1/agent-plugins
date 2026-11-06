@@ -17,7 +17,7 @@
 | **Pi** | `cmd-guard` | **命令执行守卫**：自动补 timeout / 拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看](plugins/pi/cmd-guard/README.md) |
 | **Pi** | `retry-level` | **重试档位**：菜单切档 off/3/5/10/15/30/无限，状态栏常显且可点 | `/retry` | 🟢 生产就绪 | [查看](plugins/pi/retry-level/README.md) |
 | **Pi** | `pi-prompt-compat` | **人格与粘性规则兼容层**：PERSONALITY.md + RULES.md 跨轮次常驻 | `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看](plugins/pi/pi-prompt-compat/README.md) |
-| **Pi** | `project-continuity` | 项目内记录、取消/更正、条件失败回忆与有界恢复；不建全局数据库 | `/continuity` + 三个记录工具 | 1.0.0，验收范围见文档 | [查看](plugins/pi/project-continuity/README.md) |
+| **Pi** | `project-continuity` | 项目内记录、取消/更正、条件失败回忆与有界恢复；不建全局数据库 | `/continuity` + 三个记录工具 | 1.1.0，验收范围见文档 | [查看](plugins/pi/project-continuity/README.md) |
 | **DSH** | `dsh-infinite-retry` | 仿 PI-Desktop 无限重试插件：遇网络波动/429 持续重试直到成功 | 自带设置页 Switch | 🟢 生产就绪 | [查看](plugins/dsh/dsh-infinite-retry/README.md) |
 | **PI-Desktop** | *(规划中)* | 面向 PI-Desktop 的原生 `.piplug` 扩展 | Work Panel / Sidecar | 🟡 建设中 | [分类主页](plugins/pi-desktop/README.md) |
 | **Claude Code** | *(规划中)* | 面向 Claude Code 的 MCP 工具与 Hook 增强 | 终端 CLI / Tools | 🟡 建设中 | [分类主页](plugins/claude-code/README.md) |

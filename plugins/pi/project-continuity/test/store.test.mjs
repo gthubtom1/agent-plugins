@@ -479,12 +479,12 @@ test('renderRecovery with context: no guessing across cases', async () => {
   const { root } = await withProject('render-ctx');
   await seedSource(root, 's.md', 's');
   await saveRecord(root, mkInput({
-    kind: 'claim', title: 'A-only', context: { caseRoot: 'work/A' }, source: { path: 's.md' },
+    kind: 'claim', status: 'candidate', title: 'A-only', context: { caseRoot: 'work/A', targetSha256: 'sample-a' }, source: { path: 's.md' },
   }), { expectedRevision: 0 });
   await saveRecord(root, mkInput({
-    kind: 'claim', title: 'B-only', context: { caseRoot: 'work/B' }, source: { path: 's.md' },
+    kind: 'claim', status: 'candidate', title: 'B-only', context: { caseRoot: 'work/B', targetSha256: 'sample-b' }, source: { path: 's.md' },
   }), { expectedRevision: 1 });
-  const renderA = await renderRecovery(root, { context: { caseRoot: 'work/A' } });
+  const renderA = await renderRecovery(root, { context: { caseRoot: 'work/A', targetSha256: 'sample-a' } });
   assert.ok(renderA.includes('A-only'));
   assert.ok(!renderA.includes('B-only'));
 });
