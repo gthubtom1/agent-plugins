@@ -1,3 +1,7 @@
+# Local verification and project records
+.local/
+.pi/memory/
+
 # Dependencies
 node_modules/
 .pnpm-store/

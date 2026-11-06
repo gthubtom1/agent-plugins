@@ -1,6 +1,6 @@
 {
   "name": "agent-plugins",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "多智能体插件库：面向 Pi Coding Agent / Claude Code / Codex / dsh / OpenCode 的插件精选",
   "keywords": [
     "pi-package",
@@ -16,7 +16,8 @@
       "./plugins/pi/pi-prompt-compat/prompt-compat.ts",
       "./plugins/pi/pi-seep-ext/extensions/persona.ts",
       "./plugins/pi/pi-seep-ext/extensions/rewind.ts",
-      "./plugins/pi/pi-seep-ext/extensions/remote.ts"
+      "./plugins/pi/pi-seep-ext/extensions/remote.ts",
+      "./plugins/pi/project-continuity/index.ts"
     ]
   },
   "repository": {
