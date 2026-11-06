@@ -35,7 +35,7 @@ cp retry-level/retry-level.ts        ~/.pi/agent/extensions/
 
 ```
 
-> `pi-seep-ext` 与 `pi-prompt-compat` 都是**多文件包**，不要手工拷单个文件。
+> `pi-seep-ext`、`pi-prompt-compat` 与 `project-continuity` 都是**多文件包**，不要手工拷单个文件。
 > 提示词插件单装用 `pi install <仓库路径>/plugins/pi/pi-prompt-compat`。
 
 装完**新开一个会话**生效（扩展在会话启动时加载）。
@@ -49,6 +49,7 @@ cp retry-level/retry-level.ts        ~/.pi/agent/extensions/
 | `pi-seep-ext · persona` | **按对话的人设**：人设 = `personas/*.md`（文件名就是名字），随时切换/关闭，`cached`（省 token）或 `every-turn` 注入；切「无人设」会真的删掉系统提示词里的身份 | 状态栏按钮 + `/persona` | 🟢 生产就绪 | [查看](pi-seep-ext/README.md) |
 | `pi-seep-ext · rewind` | **回退**：回到某条消息之前、或只删最后一条回复，原文放回输入框（官方 `navigateTree`，不碰会话文件） | `/rewind` `/undo-reply` | 🟢 生产就绪 | [查看](pi-seep-ext/README.md) |
 | `pi-seep-ext · remote` | **手机连上**：局域网/Tailscale 地址、终端二维码、运行期生成密码、5 行自检；不改 pi-web | `/remote` | 🟢 生产就绪 | [查看](pi-seep-ext/README.md) |
+| `project-continuity` | 项目内记录重要决定、取消、更正、失败条件和来源；新会话有界恢复 | `/continuity` + status/search/save 工具 | 1.0.0，验证边界见说明 | [查看](project-continuity/README.md) |
 | `cmd-guard` | **命令执行守卫**：自动补 timeout / 物理拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看](cmd-guard/README.md) |
 | `retry-level` | **重试档位**：菜单切档（off/3/5/10/15/30/无限），状态栏常显且可点，无限档可 Esc 中断 | `/retry` | 🟢 生产就绪 | [查看](retry-level/README.md) |
 | `pi-prompt-compat` | **人格与粘性规则兼容层**：PERSONALITY.md + RULES.md 跨轮次常驻 | `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看](pi-prompt-compat/README.md) |

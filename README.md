@@ -17,6 +17,7 @@
 | **Pi** | `cmd-guard` | **命令执行守卫**：自动补 timeout / 拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看](plugins/pi/cmd-guard/README.md) |
 | **Pi** | `retry-level` | **重试档位**：菜单切档 off/3/5/10/15/30/无限，状态栏常显且可点 | `/retry` | 🟢 生产就绪 | [查看](plugins/pi/retry-level/README.md) |
 | **Pi** | `pi-prompt-compat` | **人格与粘性规则兼容层**：PERSONALITY.md + RULES.md 跨轮次常驻 | `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看](plugins/pi/pi-prompt-compat/README.md) |
+| **Pi** | `project-continuity` | 项目内记录、取消/更正、条件失败回忆与有界恢复；不建全局数据库 | `/continuity` + 三个记录工具 | 1.0.0，验收范围见文档 | [查看](plugins/pi/project-continuity/README.md) |
 | **DSH** | `dsh-infinite-retry` | 仿 PI-Desktop 无限重试插件：遇网络波动/429 持续重试直到成功 | 自带设置页 Switch | 🟢 生产就绪 | [查看](plugins/dsh/dsh-infinite-retry/README.md) |
 | **PI-Desktop** | *(规划中)* | 面向 PI-Desktop 的原生 `.piplug` 扩展 | Work Panel / Sidecar | 🟡 建设中 | [分类主页](plugins/pi-desktop/README.md) |
 | **Claude Code** | *(规划中)* | 面向 Claude Code 的 MCP 工具与 Hook 增强 | 终端 CLI / Tools | 🟡 建设中 | [分类主页](plugins/claude-code/README.md) |
@@ -57,6 +58,12 @@ pi install git:github.com/gthubtom1/agent-plugins@main
 pi install <本地路径>/plugins/pi/pi-seep-ext
 ```
 
+### 项目续接与 Reverse 组合安装
+
+[project-continuity](plugins/pi/project-continuity/README.md) 的记录留在每个项目自己的 `.pi/memory/`。单独加载此 package 时，不会启用本库其他插件；不要只复制 `index.ts`。
+
+换电脑使用 [reverse-workflow-installer](https://github.com/gthubtom1/reverse-workflow-installer) 的 Pi 默认安装，它会冻结本插件发布 tag 的确切 commit，只注册该子目录，并保留安装与恢复回执。插件程序随环境安装，项目记录随项目备份迁移。
+
 ### 第三方插件
 
 用 npm 装，不锁版本、跟着上游更新：
@@ -76,6 +83,7 @@ agent-plugins/
 │   │   ├── pi-seep-ext/         #   人设 / 回退 / 远程（包形式：extensions/ + lib/ + test/）
 │   │   ├── cmd-guard/           #   单文件扩展
 │   │   ├── retry-level/
+│   │   ├── project-continuity/  #   项目级续接（本地文件，无数据库）
 │   │   └── pi-prompt-compat/
 │   ├── dsh/
 │   ├── claude-code/ codex/ opencode/ pi-desktop/   # 占位（只有 README）
