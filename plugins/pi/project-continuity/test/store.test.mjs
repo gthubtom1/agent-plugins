@@ -55,7 +55,8 @@ test('resolveProject: explicit uninitialized workspace stays local, exists=false
   await fsp.mkdir(dir, { recursive: true });
   const r = await resolveProject(dir, { root: dir });
   assert.equal(r.exists, false);
-  assert.equal(r.root, dir);
+  // The Windows runner may expose TEMP through an 8.3 path alias.
+  assert.equal(r.root, await fsp.realpath(dir));
   assert.equal(r.revision, 0);
   assert.ok(r.workspaceKey.length > 0);
 });
