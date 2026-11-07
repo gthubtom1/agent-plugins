@@ -19,6 +19,10 @@ async function project(name) {
   await fsp.writeFile(path.join(root, 'source.md'), 'fixture evidence');
   return root;
 }
+async function caseFixture(root, relative) {
+  await fsp.mkdir(path.join(root, relative), { recursive: true });
+  await fsp.writeFile(path.join(root, relative, 'scope.md'), 'fixture scope');
+}
 async function save(root, id, extra = {}) {
   return saveRecord(root, input(id, extra), { expectedRevision: (await readState(root)).revision });
 }
@@ -76,7 +80,7 @@ test('explicit save length limits reject overflow and preserve exact-boundary va
     ['input.source.excerpt', { source: { path: 'source.md', excerpt: 'e'.repeat(2001) } }],
     ['input.aliases', { aliases: Array(21).fill('duplicate') }],
     ['input.aliases[0]', { aliases: [' ' + 'a'.repeat(256)] }],
-    ...['caseRoot', 'branch', 'targetSha256', 'method', 'config', 'question'].map((key) =>
+    ...['caseRoot', 'branch', 'targetSha256', 'method', 'config', 'question', 'goalId', 'goalText', 'targetIdentity', 'requestedOutput', 'scope', 'authorization', 'constraints', 'successCriteria', 'stopConditions', 'phase', 'decisionDelta', 'evidenceRefs', 'unknowns', 'blockers', 'delivery'].map((key) =>
       [`input.context.${key}`, { context: { [key]: 'c'.repeat(2001) } }]),
   ];
   for (const [field, extra] of cases) {
@@ -165,6 +169,8 @@ test('Chinese historical aliases reach the final cancellation through replacemen
 
 test('replacement context is checked after following an old id or query', async () => {
   const root = await project('replacement-context');
+  await caseFixture(root, 'A');
+  await caseFixture(root, 'B');
   await save(root, 'old', { aliases: ['历史别名'], context: { caseRoot: 'A' } });
   await save(root, 'new', { supersedes: 'old', context: { caseRoot: 'B' }, text: 'B-only fact' });
   for (const selector of [{ id: '历史别名' }, { query: '历史别名' }]) {
@@ -180,6 +186,7 @@ test('replacement context is checked after following an old id or query', async 
 
 test('incompatible results are bounded metadata without unrelated facts or source excerpts', async () => {
   const root = await project('bounded-incompatible');
+  await caseFixture(root, 'elsewhere');
   for (let n = 0; n < 8; n++) {
     await save(root, `other-${n}`, { context: { caseRoot: 'elsewhere' },
       text: 'UNRELATED_FACT', reason: 'UNRELATED_REASON',
@@ -194,6 +201,7 @@ test('incompatible results are bounded metadata without unrelated facts or sourc
 
 test('failed attempt only applies under matching method, config and question; recovery states conditions', async () => {
   const root = await project('conditional-attempt');
+  await caseFixture(root, 'A');
   const context = { caseRoot: 'A', branch: 'main', targetSha256: 'sample-v1',
     method: 'parser', config: 'budget=10', question: 'decode header' };
   await save(root, 'attempt', { kind: 'attempt', status: 'failed', context, title: 'header timeout' });
@@ -485,6 +493,7 @@ test('cancelled decision is terminal and old title remains searchable', async ()
 
 test('target-bound technical records stay hidden until the target identity is selected', async () => {
   const root = await project('target-bound');
+  await caseFixture(root, 'work/a');
   await save(root, 'sample-a-fact', { kind: 'claim', status: 'candidate', context: { caseRoot: 'work/a', targetSha256: 'sample-a' }, text: 'A-only evidence' });
   assert.deepEqual((await lookup(root, { context: { caseRoot: 'work/a' } })).records, []);
   assert.deepEqual((await lookup(root, { context: { caseRoot: 'work/a', targetSha256: 'sample-b' } })).records, []);

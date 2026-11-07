@@ -58,7 +58,7 @@ test('moved project remains readable and explicit adopt permits further saves', 
   assert.equal(JSON.parse(text(await h.call('continuity_status', {}))).revision, 2);
 });
 
-test('ambiguous reverse cases require scope for technical records and skip automatic narration', async t => {
+test('ambiguous cases require explicit technical scope and quarantine unassigned narration', async t => {
   const h = await harness(t);
   for (const name of ['a', 'b']) {
     await fs.mkdir(path.join(h.cwd, 'work', name), { recursive: true });
@@ -69,8 +69,10 @@ test('ambiguous reverse cases require scope for technical records and skip autom
   await assert.rejects(h.call('continuity_save', { expectedRevision: 1, record }), /case_required/);
   h.entries.push({ type: 'message', id: 'a1', message: { role: 'assistant', content: [{ type: 'text', text: '两个案例都成功了（未验证）' }] } });
   await h.event('agent_settled', { aborted: false });
-  assert.equal(JSON.parse(text(await h.call('continuity_status', {}))).revision, 1);
-  await h.call('continuity_save', { expectedRevision: 1, record: { ...record, context: { caseRoot: 'work/a', targetSha256: 'sample-a' } } });
+  const status = JSON.parse(text(await h.call('continuity_status', {})));
+  assert.equal(status.revision, 2);
+  assert.doesNotMatch(status.recovery, /两个案例都成功/);
+  await h.call('continuity_save', { expectedRevision: 2, record: { ...record, context: { caseRoot: 'work/a', targetSha256: 'sample-a' } } });
   assert.equal(JSON.parse(text(await h.call('continuity_search', { id: 'candidate', context: { caseRoot: 'work/a', targetSha256: 'sample-a' } }))).records.length, 1);
 });
 

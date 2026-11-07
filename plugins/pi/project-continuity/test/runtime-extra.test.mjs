@@ -27,6 +27,19 @@ test('multiple cases are listed as ambiguous, not picked by time or merged', asy
   assert.match(c.messages.at(-1).content,/do not merge/);
 });
 
+test('manual-only candidate mode suppresses automatic assistant self-report', async t => {
+  const h = await harness(t);
+  await h.call('continuity_save', { expectedRevision: 0, record: { id: 'goal', kind: 'decision', title: '目标', text: '手动记录', status: 'accepted' } });
+  await h.commands.get('continuity').handler('candidates off', h.ctx);
+  h.entries.push({ type: 'message', id: 'manual-a1', message: { role: 'assistant', content: [{ type: 'text', text: '这段自述不应自动落盘' }] } });
+  await h.event('agent_settled', { aborted: false });
+  const status = JSON.parse(text(await h.call('continuity_status', {})));
+  assert.equal(status.revision, 1);
+  assert.equal(status.automatic_candidates, false);
+  const search = JSON.parse(text(await h.call('continuity_search', { query: '自述' })));
+  assert.equal(search.records.length, 0);
+});
+
 test('same final self-report is not saved repeatedly on idle lifecycle events',async t=>{
   const h=await harness(t);
   await h.call('continuity_save',{expectedRevision:0,record:{id:'goal',kind:'decision',title:'目标',text:'只读核对',status:'accepted'}});

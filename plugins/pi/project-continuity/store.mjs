@@ -54,7 +54,21 @@ export const DEFAULT_STATUS = Object.freeze({
 });
 
 const CONTEXT_KEYS = ['caseRoot', 'branch', 'targetSha256', 'method', 'config', 'question'];
+// Read old drafts without treating their free-form context as current evidence.
+const LEGACY_GUIDED_KEYS = ['goalId', 'goalText', 'targetIdentity', 'requestedOutput', 'scope',
+  'authorization', 'constraints', 'successCriteria', 'stopConditions', 'phase',
+  'decisionDelta', 'evidenceRefs', 'unknowns', 'blockers', 'delivery'];
+export const POINTER_ROLES = Object.freeze(['goal', 'target', 'requestedOutput', 'scope',
+  'authorization', 'constraints', 'successCriteria', 'stopConditions', 'phase',
+  'decisionDelta', 'evidence', 'unknowns', 'blockers', 'delivery']);
 const SCOPED_KINDS = new Set(['observation', 'claim', 'attempt', 'artifact']);
+const legacyGuided = rec => LEGACY_GUIDED_KEYS.some(key => Object.hasOwn(rec.context || {}, key));
+const guided = rec => Boolean(rec.pointers?.length) || legacyGuided(rec);
+const scoped = rec => SCOPED_KINDS.has(rec.kind) || guided(rec) ||
+  (rec.kind === 'context' && Boolean(rec.context?.caseRoot || rec.context?.targetSha256));
+const unassignedFailure = rec => rec.capture === 'tool-error' &&
+  !rec.context?.caseRoot && !rec.context?.targetSha256;
+const unassignedCandidate = rec => rec.kind === 'claim' && !rec.context?.caseRoot && !rec.context?.targetSha256;
 const TOMBSTONE_STATUS = ['superseded', 'cancelled', 'retired', 'rejected'];
 const FATAL_ISSUES = new Set(['TAMPER', 'PARSE_ERROR', 'CORRUPT', 'SOURCE_ESCAPE', 'STATE_ESCAPE']);
 
@@ -586,6 +600,101 @@ async function markStale(rootAbs, rec) {
   return true;
 }
 
+// Guided references use canonical project-relative paths, never prose or URLs.
+function pointerPath(value, field) {
+  checkInputLength(value, field, 512);
+  if (typeof value !== 'string' || !value || value !== value.trim() ||
+      /[\\\u0000-\u001f\u007f:#?]/.test(value) || path.posix.isAbsolute(value) ||
+      path.win32.isAbsolute(value) || value.split('/').some(p => !p || p === '.' || p === '..')) {
+    fail(`${field} must be a canonical project-relative path without traversal`, 'INVALID_POINTER');
+  }
+  return value;
+}
+
+// Reject case aliases and linked references; an unchanged hash cannot certify
+// that a reference still belongs to the selected case after a path swap.
+async function plainPath(root, relative) {
+  let current = path.resolve(root);
+  for (const part of relative.split('/')) {
+    current = path.join(current, part);
+    const st = await fsp.lstat(current);
+    if (st.isSymbolicLink() || (st.isFile() && st.nlink > 1)) fail('Linked case/reference is not allowed', 'INVALID_CASE');
+  }
+  return current;
+}
+
+export async function validateCaseRoot(root, caseRoot) {
+  pointerPath(caseRoot, 'context.caseRoot');
+  try {
+    const dir = await plainPath(root, caseRoot);
+    const scope = await plainPath(root, `${caseRoot}/scope.md`);
+    if (!(await fsp.stat(dir)).isDirectory() || !(await fsp.stat(scope)).isFile()) throw new Error('not a case');
+  } catch {
+    fail('caseRoot must identify an existing unlinked case directory with scope.md', 'INVALID_CASE');
+  }
+  return caseRoot;
+}
+
+function normalizePointers(pointers) {
+  if (pointers === undefined) return undefined;
+  if (!Array.isArray(pointers) || !pointers.length || pointers.length > 16) {
+    fail('pointers must contain 1 to 16 source references; do not drop constraints', 'INVALID_POINTER');
+  }
+  return pointers.map(p => {
+    if (!p || typeof p !== 'object' || Array.isArray(p) ||
+        Object.keys(p).some(k => !['role', 'path', 'sha256'].includes(k)) || !POINTER_ROLES.includes(p.role)) {
+      fail('Each pointer requires a supported role and a source path', 'INVALID_POINTER');
+    }
+    pointerPath(p.path, 'pointer.path');
+    if (p.sha256 !== undefined && (typeof p.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(p.sha256))) {
+      fail('pointer.sha256 must be a lowercase SHA256', 'INVALID_POINTER');
+    }
+    return { role: p.role, path: p.path, ...(p.sha256 ? { sha256: p.sha256 } : {}) };
+  });
+}
+
+async function capturePointers(root, rec) {
+  if (guided(rec) && (!rec.context?.caseRoot || !rec.context?.targetSha256)) {
+    fail('Guided records require explicit caseRoot and exact targetSha256', 'IDENTITY_REQUIRED');
+  }
+  if (rec.context?.caseRoot) {
+    await validateCaseRoot(root, rec.context.caseRoot);
+    if (scoped(rec) && !rec.context.targetSha256) fail('Case technical context requires exact targetSha256', 'IDENTITY_REQUIRED');
+  }
+  if ((guided(rec) || rec.kind === 'context') && rec.context?.caseRoot) {
+    const scopePath = `${rec.context.caseRoot}/scope.md`;
+    rec.pointers ??= [];
+    if (!rec.pointers.some(p => p.role === 'scope' && p.path === scopePath)) {
+      if (rec.pointers.length >= 16) fail('Reserve a pointer for case scope.md; no references were dropped', 'INVALID_POINTER');
+      rec.pointers.push({ role: 'scope', path: scopePath });
+    }
+  }
+  for (const p of rec.pointers || []) {
+    if (!p.path.startsWith(`${rec.context.caseRoot}/`)) fail('Guided pointer must belong to the selected case', 'POINTER_CASE_MISMATCH');
+    await plainPath(root, p.path);
+    const source = await computeSourceHash(root, p.path);
+    if (p.sha256 && p.sha256 !== source.hash) fail('Referenced source hash does not match', 'SOURCE_HASH');
+    p.sha256 = source.hash;
+  }
+}
+
+async function freshness(root, rec) {
+  const staleSource = await markStale(root, rec);
+  const stalePointers = [];
+  let invalidCase = false;
+  if (rec.context?.caseRoot) {
+    try { await validateCaseRoot(root, rec.context.caseRoot); } catch { invalidCase = true; }
+  }
+  for (const p of rec.pointers || []) {
+    let stale = invalidCase || !p.path.startsWith(`${rec.context?.caseRoot}/`);
+    try { await plainPath(root, p.path); } catch { stale = true; }
+    if (stale || await markStale(root, { source: p })) stalePointers.push({ role: p.role, path: p.path });
+  }
+  return { staleSource, stalePointers, invalidCase,
+    needsReview: staleSource || stalePointers.length > 0 || invalidCase || legacyGuided(rec) ||
+      (rec.kind === 'context' && Boolean(rec.context?.caseRoot) && !rec.pointers?.length) };
+}
+
 // ---------------------------------------------------------------------------
 // input validation / normalization
 // ---------------------------------------------------------------------------
@@ -635,16 +744,16 @@ function normalizeInput(input, root) {
   };
   if (!source.path) fail('input.source.path is required (file required source)', 'INVALID_INPUT');
   const ctxOut = {};
-  if (input.context && typeof input.context === 'object') {
-    for (const k of CONTEXT_KEYS) {
-      const v = input.context[k];
-      if (v !== undefined && v !== null && v !== '') {
-        const value = String(v);
-        checkInputLength(value, `input.context.${k}`, 2000);
-        ctxOut[k] = value;
-      }
+  if (input.context !== undefined) {
+    if (!input.context || typeof input.context !== 'object' || Array.isArray(input.context)) fail('context must be an object', 'INVALID_INPUT');
+    for (const [k, v] of Object.entries(input.context)) {
+      checkInputLength(v, `input.context.${k}`, 2000);
+      if (!CONTEXT_KEYS.includes(k)) fail(`Unsupported context.${k}; use bounded pointers instead of free-form guided state`, 'INVALID_INPUT');
+      if (typeof v !== 'string' || !v.trim() || v !== v.trim() || isControl(v)) fail(`Invalid context.${k}`, 'INVALID_INPUT');
+      ctxOut[k] = v;
     }
   }
+  const pointers = normalizePointers(input.pointers);
   const result = {
     id,
     kind,
@@ -653,6 +762,7 @@ function normalizeInput(input, root) {
     status,
     source,
     context: Object.keys(ctxOut).length ? ctxOut : undefined,
+    ...(pointers ? { pointers } : {}),
   };
   if (Array.isArray(input.aliases)) {
     if (input.aliases.length > 20) {
@@ -680,6 +790,11 @@ function normalizeInput(input, root) {
 // ---------------------------------------------------------------------------
 const changeBytes = (change) => Buffer.from(JSON.stringify(change, null, 2) + '\n');
 
+function validStoredPointers(pointers) {
+  if (pointers === undefined) return true;
+  try { return normalizePointers(pointers).every(p => typeof p.sha256 === 'string'); } catch { return false; }
+}
+
 function validChange(change) {
   const r = change?.record;
   return change && typeof change === 'object' && change.schema === SCHEMA &&
@@ -691,6 +806,13 @@ function validChange(change) {
     r && r.id === change.logicalId && KINDS.includes(r.kind) &&
     (STATUS[r.kind].includes(r.status) || TOMBSTONE_STATUS.includes(r.status)) &&
     typeof r.title === 'string' && typeof r.source?.path === 'string' &&
+    (!r.context || (r.context && typeof r.context === 'object' && !Array.isArray(r.context) &&
+      Object.entries(r.context).every(([key, value]) => [...CONTEXT_KEYS, ...LEGACY_GUIDED_KEYS].includes(key) && typeof value === 'string'))) &&
+    validStoredPointers(r.pointers) &&
+    (r.pointers === undefined || (typeof r.context?.caseRoot === 'string' && !!r.context.caseRoot.trim() &&
+      typeof r.context?.targetSha256 === 'string' && !!r.context.targetSha256.trim())) &&
+    (r.capture === undefined || (r.capture === 'assistant' && r.kind === 'claim') ||
+      (r.capture === 'tool-error' && r.kind === 'attempt' && (r.status === 'failed' || TOMBSTONE_STATUS.includes(r.status)))) &&
     (!r.aliases || (Array.isArray(r.aliases) && r.aliases.every((a) => typeof a === 'string')));
 }
 
@@ -853,6 +975,8 @@ function recordObject(entry) {
     allTitles: entry.allTitles || [],
     source: c.source || { path: '' },
     context: c.context || {},
+    ...(c.pointers ? { pointers: c.pointers } : {}),
+    ...(c.capture ? { capture: c.capture } : {}),
     reason: c.reason,
     supersedes: c.supersedes,
     supersededBy: entry.supersededBy || undefined,
@@ -937,6 +1061,7 @@ function digestBlock(rec) {
   if (rec.context && Object.keys(rec.context).length) {
     lines.push(`context: ${Object.entries(rec.context).map(([k, v]) => `${k}=${v}`).join(', ')}`);
   }
+  if (rec.pointers) lines.push(`pointers: ${JSON.stringify(rec.pointers)}`);
   if (rec.supersedes) lines.push(`supersedes: ${rec.supersedes}`);
   return lines;
 }
@@ -1032,6 +1157,29 @@ export async function saveRecord(root, input, opts = {}) {
   const sessionId = typeof opts.sessionId === 'string' ? opts.sessionId : 'unknown';
 
   const rec = normalizeInput(input, rootAbs);
+  if (opts.capture !== undefined) {
+    if (!['assistant', 'tool-error'].includes(opts.capture) ||
+        (opts.capture === 'assistant' && rec.kind !== 'claim') ||
+        (opts.capture === 'tool-error' && (rec.kind !== 'attempt' || rec.status !== 'failed'))) {
+      fail('Invalid automatic capture kind/status', 'INVALID_INPUT');
+    }
+    rec.capture = opts.capture;
+  }
+  const closingScoped = ['cancelled', 'retired'].includes(rec.status) &&
+    Boolean(rec.context?.caseRoot || rec.pointers?.length);
+  if (closingScoped) {
+    // A tombstone revokes an existing record; its old case may no longer exist.
+    // Validate names here, then bind identity/hashes to the journal under CAS.
+    pointerPath(rec.context?.caseRoot, 'context.caseRoot');
+    if (!rec.context?.targetSha256) fail('Scoped tombstones require the original target identity', 'IDENTITY_REQUIRED');
+    for (const p of rec.pointers || []) {
+      if (!p.path.startsWith(`${rec.context.caseRoot}/`) || !p.sha256) {
+        fail('Retained tombstone pointers require case-local paths and stored hashes', 'INVALID_POINTER');
+      }
+    }
+  } else {
+    await capturePointers(rootAbs, rec);
+  }
 
   // confine + capture source before locking (fast fail on bad paths)
   const relSrc = await confineSource(rootAbs, rec.source.path);
@@ -1052,6 +1200,7 @@ export async function saveRecord(root, input, opts = {}) {
     const file = path.join(memoryDir, PROJECT_FILE);
     let pf;
     if (!(await pathExists(file))) {
+      if (closingScoped) fail('Scoped tombstones require an existing record', 'TARGET_UNKNOWN');
       if (expectedRevision !== 0) fail('project not initialized; expectedRevision must be 0', 'PROJECT_NOT_FOUND');
       const key = await workspaceKeyFor(rootAbs);
       const init = await initializeProjectUnlocked(rootAbs, { _now: opts._now });
@@ -1079,6 +1228,29 @@ export async function saveRecord(root, input, opts = {}) {
       fail('Cannot save: changes journal is corrupt (tampered/gapped). Fix issues first.', 'CORRUPT_JOURNAL');
     }
     const { byId } = j;
+    const previousRecord = byId.get(rec.id)?.current?.change?.record;
+    if (closingScoped) {
+      if (!previousRecord) fail('Scoped tombstones require an existing record', 'TARGET_UNKNOWN');
+      if (previousRecord.kind !== rec.kind || rec.supersedes ||
+          ['caseRoot', 'targetSha256', 'branch'].some(key => previousRecord.context?.[key] !== rec.context?.[key])) {
+        fail('Scoped tombstones must retain the original kind and exact case/target/branch identity', 'IDENTITY_REQUIRED');
+      }
+      for (const p of rec.pointers || []) {
+        if (!previousRecord.pointers?.some(old => old.role === p.role && old.path === p.path && old.sha256 === p.sha256)) {
+          fail('A tombstone may only retain pointers with their original stored hashes', 'INVALID_POINTER');
+        }
+      }
+    }
+    if (previousRecord && scoped(previousRecord) && previousRecord.context?.caseRoot &&
+        (!rec.context?.caseRoot || !rec.context?.targetSha256)) {
+      fail('A scoped record update must retain an explicit case and target identity', 'IDENTITY_REQUIRED');
+    }
+    if (previousRecord?.pointers?.length && !TOMBSTONE_STATUS.includes(rec.status)) {
+      const removed = previousRecord.pointers.some(old => !rec.pointers?.some(p => p.role === old.role && p.path === old.path));
+      if (input.pointers === undefined || (removed && !rec.reason)) {
+        fail('Resupply the guided pointer set on update; removing references requires a recorded reason', 'POINTERS_REQUIRED');
+      }
+    }
     if (byId.get(rec.id)?.current?.change?.record?.status === 'cancelled' && rec.status !== 'cancelled') {
       fail('A cancelled decision is terminal; use a new id for a new proposal.', 'CANCELLED_TERMINAL');
     }
@@ -1206,26 +1378,20 @@ export async function saveRecord(root, input, opts = {}) {
 // ---------------------------------------------------------------------------
 function ctxCompatible(record, filterCtx) {
   const recordCtx = record?.context || {};
-  const scoped = SCOPED_KINDS.has(record?.kind);
-  const has = (value) => value !== undefined && value !== null && value !== '';
-  for (const key of CONTEXT_KEYS) {
-    const fv = filterCtx && filterCtx[key];
-    const rv = recordCtx[key];
-    const selected = has(fv);
-    const recorded = has(rv);
+  const has = value => value !== undefined && value !== null && value !== '';
+  // Unassigned tool errors remain searchable, explicitly labelled as such.
+  // They never gain a case/target just because the caller selected one.
+  const keys = unassignedFailure(record) || unassignedCandidate(record) ? ['branch', 'method', 'config', 'question'] : CONTEXT_KEYS;
+  for (const key of keys) {
+    const fv = filterCtx?.[key], rv = recordCtx[key];
+    const selected = has(fv), recorded = has(rv);
     if (selected && recorded && rv !== String(fv)) return false;
-    // A scoped technical fact without the selected identity is not a global
-    // fact. Likewise, a bound fact is hidden when the current identity is
-    // unknown; callers can explicitly query it after establishing identity.
-    if (scoped && ['caseRoot', 'branch'].includes(key)) {
-      if (selected && !recorded) return false;
-      if (!selected && recorded) return false;
-    }
-    if (scoped && key === 'targetSha256') {
-      if (selected && !recorded) return false;
-      if (!selected && recorded && has(filterCtx?.caseRoot)) return false;
-    }
+    if (key === 'caseRoot' && recorded && !selected) return false;
+    if (key === 'targetSha256' && recorded && !selected) return false;
+    if (scoped(record) && ['caseRoot', 'branch', 'targetSha256'].includes(key) && selected !== recorded) return false;
   }
+  // A legacy guided draft with no identity is never project-global context.
+  if (guided(record) && (!has(recordCtx.caseRoot) || !has(recordCtx.targetSha256))) return false;
   return true;
 }
 
@@ -1283,7 +1449,7 @@ export async function lookup(root, opts = {}) {
             const selected = filterCtx?.[key] !== undefined && filterCtx[key] !== null && filterCtx[key] !== '';
             const recorded = current.context?.[key] !== undefined && current.context[key] !== null && current.context[key] !== '';
             return (selected && recorded && current.context[key] !== String(filterCtx[key])) ||
-              (SCOPED_KINDS.has(current.kind) && ['caseRoot', 'branch', 'targetSha256'].includes(key) && selected !== recorded);
+              (scoped(current) && ['caseRoot', 'branch', 'targetSha256'].includes(key) && selected !== recorded);
           }) });
       }
       continue;
@@ -1301,13 +1467,14 @@ export async function lookup(root, opts = {}) {
 
   const output = [];
   for (const item of withCur.slice(0, limit)) {
-    const stale = await markStale(rootAbs, item.record);
+    const fresh = await freshness(rootAbs, item.record);
     output.push({
       record: item.record,
       current: item.current,
-      staleSource: stale,
-      needsReview: stale && !item.current.tombstone,
-      effectiveStatus: stale && !item.current.tombstone ? 'needs-review' : item.current.status,
+      ...fresh,
+      unassigned: unassignedFailure(item.record) || unassignedCandidate(item.record),
+      needsReview: fresh.needsReview && !item.current.tombstone,
+      effectiveStatus: fresh.needsReview && !item.current.tombstone ? 'needs-review' : item.current.status,
       history: history ? (await historyOf(journal, item.record.id)) : undefined,
     });
   }
@@ -1401,44 +1568,73 @@ export async function renderRecovery(root, opts = {}) {
   }
   R.add(`Project memory: ${st.project.projectId} (rev ${st.revision})`);
   const filterCtx = opts.context && typeof opts.context === 'object' ? opts.context : null;
-  const relevant = st.records.filter((r) => ctxCompatible(r, filterCtx));
-  const tombs = relevant.filter((r) => r.tombstone).sort((a, b) => b.projectRevision - a.projectRevision);
-  const constraints = relevant.filter((r) => !r.tombstone && (r.kind === 'decision' || r.kind === 'context')).sort((a, b) => b.projectRevision - a.projectRevision);
-  const others = relevant.filter((r) => !r.tombstone && r.kind !== 'decision' && r.kind !== 'context')
-    .filter((r) => !opts.query || matchQuery(r, opts.query))
+  const compatible = st.records.filter(r => ctxCompatible(r, filterCtx));
+  // All claims are candidates. Quarantine their titles as well as their bodies,
+  // including v1.1 automatic captures that have no capture metadata.
+  const quarantined = compatible.filter(r => r.kind === 'claim' && !r.tombstone);
+  const relevant = compatible.filter(r => r.kind !== 'claim' || r.tombstone);
+  const tombs = relevant.filter(r => r.tombstone).sort((a, b) => b.projectRevision - a.projectRevision);
+  const constraints = relevant.filter(r => !r.tombstone && (r.kind === 'decision' || r.kind === 'context' || guided(r)))
     .sort((a, b) => b.projectRevision - a.projectRevision);
+  const failures = relevant.filter(r => !r.tombstone && unassignedFailure(r));
+  const others = relevant.filter(r => !r.tombstone && !constraints.includes(r) && !failures.includes(r))
+    .filter(r => !opts.query || matchQuery(r, opts.query))
+    .sort((a, b) => b.projectRevision - a.projectRevision);
+  const pointerLines = (r, fresh) => (r.pointers || []).map(p =>
+    `  ${p.role}: ${p.path} [${fresh.needsReview ? 'needs-review' : 'hash unchanged; source pointer only'}]`).join('\n');
 
-  // Compact tombstones and constraint pointers precede all explanatory text and
-  // ordinary facts. Never print a record's body without its status/id context.
+  // Compact tombstones/constraint pointers precede details. Stale titles can
+  // contain a success claim too, so withhold them alongside stale bodies.
   const core = [];
   for (const r of [...tombs, ...constraints]) {
-    const stale = await markStale(rootAbs, r);
-    const flags = stale && !r.tombstone ? ' {SOURCE STALE/MISSING; NEEDS REVIEW}' : '';
+    const fresh = await freshness(rootAbs, r);
+    const stale = fresh.needsReview && !r.tombstone;
+    const flags = stale ? ' {SOURCE STALE/MISSING OR LEGACY GUIDED DATA; NEEDS REVIEW}' : '';
     const link = r.supersededBy ? ` -> current: ${r.supersededBy}` : '';
-    const status = stale && !r.tombstone ? 'needs-review' : r.status;
+    const status = stale ? 'needs-review' : r.status;
     const pointer = `- [${status}] (${r.id})${flags}${link}`;
-    if (R.add(`${pointer} ${r.title}`, `${pointer} [details omitted]`)) core.push({ record: r, stale });
+    const title = stale || r.kind === 'claim' ? '[details withheld]' : r.title;
+    if (R.add(`${pointer} ${title}`, `${pointer} [details omitted]`)) core.push({ record: r, fresh });
   }
-  for (const item of core) {
-    const r = item.record;
-    if (item.stale && !r.tombstone) {
-      R.add(`(${r.id}) [needs-review] source changed or is missing; do not use the old text as current proof.`);
+  for (const { record: r, fresh } of core) {
+    if (r.kind === 'claim') continue;
+    if (fresh.needsReview && !r.tombstone) {
+      R.add(`(${r.id}) [needs-review] source changed, missing, unsafe or legacy; do not use the old title/text as current proof.\n${pointerLines(r, fresh)}${r.source?.path ? `\nsource: ${r.source.path}` : ''}`);
       continue;
     }
-    const details = [r.reason && `reason: ${r.reason}`, r.text,
+    const details = [guided(r) && 'Guided recovery only: no task, authorization or verification authority.',
+      r.reason && `reason: ${r.reason}`, pointerLines(r, fresh), r.text,
       r.source?.path && `source: ${r.source.path}`].filter(Boolean).join('\n');
     if (details) R.add(`(${r.id}) [${r.status}]\n${details}`);
   }
-  for (const r of others) {
-    const stale = await markStale(rootAbs, r);
-    const flags = [r.kind === 'claim' && 'NOT verified (candidate)', stale && 'SOURCE STALE/MISSING; NEEDS REVIEW'].filter(Boolean);
-    const status = stale ? 'needs-review' : r.status;
-    const conditions = r.kind === 'attempt'
-      ? `\nAttempt conditions: ${Object.entries(r.context).map(([k, v]) => `${k}=${v}`).join(', ') || 'unspecified; not a general prohibition'}` : '';
-    const block = `- [${status}] (${r.id}) ${r.title}${flags.length ? ' {' + flags.join('; ') + '}' : ''}${conditions}` +
-      (r.reason ? `\nreason: ${r.reason}` : '') + (r.source?.path ? `\nsource: ${r.source.path}` : '');
-    R.add(block);
+
+  // No target is inferred from prose, a transcript, mtime, or an old record.
+  // With no selected target, only case-confined source pointers may surface.
+  if (!filterCtx?.targetSha256) {
+    for (const r of st.records) {
+      if (!r.pointers?.length || r.tombstone || r.kind === 'claim' || compatible.includes(r)) continue;
+      if (filterCtx?.caseRoot && filterCtx.caseRoot !== '__unselected_case__' && r.context.caseRoot !== filterCtx.caseRoot) continue;
+      if ((r.context.branch || filterCtx?.branch) && r.context.branch !== filterCtx?.branch) continue;
+      const fresh = await freshness(rootAbs, r);
+      if (fresh.invalidCase) { R.add('Guided source unavailable: case path needs review; facts withheld.'); continue; }
+      R.add(`Guided sources (target not selected; read sources to establish identity, no saved facts):\n${pointerLines(r, fresh)}`);
+    }
   }
+  if (failures.length) R.add('Unassigned tool failures: case/target unknown; conditional attempts only, never case evidence.');
+  for (const r of [...failures, ...others]) {
+    const fresh = await freshness(rootAbs, r);
+    const flags = fresh.needsReview ? ' {SOURCE STALE/MISSING; NEEDS REVIEW}' : '';
+    const status = fresh.needsReview ? 'needs-review' : r.status;
+    const unknownCase = unassignedFailure(r) && filterCtx?.caseRoot;
+    const values = Object.entries(r.context).filter(([key]) => !unknownCase || ['branch', 'method', 'config'].includes(key));
+    const shortened = values.some(([, value]) => value.length > 160);
+    const conditions = r.kind === 'attempt' && !fresh.needsReview
+      ? `\nAttempt conditions: ${values.map(([key, value]) => `${key}=${value.length > 160 ? value.slice(0, 160) + '… [omitted]' : value}`).join(', ') || 'unspecified; not a general prohibition'}` +
+        (shortened ? `\nDisplay shortened only; full conditions: lookup id=${r.id}, source below.` : '') : '';
+    R.add(`- [${status}] (${r.id}) ${fresh.needsReview || unknownCase ? '[details withheld; use explicit search]' : r.title}${flags}${conditions}` +
+      (!fresh.needsReview && !unknownCase && r.reason ? `\nreason: ${r.reason}` : '') + (r.source?.path ? `\nsource: ${r.source.path}` : ''));
+  }
+  if (quarantined.length) R.add('Candidate claims quarantined from automatic recovery (including titles); use explicit search to inspect.');
   R.add('Claims are NOT verified. Sources are pointers; use lookup for full records.');
   return R.lines();
 }
