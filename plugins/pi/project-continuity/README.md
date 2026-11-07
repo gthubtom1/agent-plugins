@@ -1,4 +1,4 @@
-# Project Continuity：项目级续接 1.1.0
+# Project Continuity：项目级续接 1.2.0
 
 把重要决定、取消/更正、失败条件与证据入口留在**当前项目**，让 Pi Web/CLI 新对话或压缩后能恢复。扩展安装一次，项目记录各自独立；没有全局项目数据库、向量服务、自动上传或后台模型费用。
 
@@ -13,6 +13,7 @@
 - `/continuity adopt`：项目搬家或复制后，保留记录并将这份工作副本接到当前路径；接管前可读，写入会拒绝。
 - `/continuity search 关键词`：查询本项目。
 - `/continuity off` / `/continuity on`：本会话关闭/开启。
+- `/continuity candidates off` / `/continuity candidates on`：只关闭/开启自动保存 assistant 自述，手动保存和条件性工具错误收集不受影响。此选项保存为 Pi 原生 custom entry，按当前会话分支在 reload/resume/tree 时恢复；新会话默认开启。整个插件的 `off` 仍只作用于当前运行时，reload 后开启。非法命令或多余参数只返回用法，不改变开关。
 
 ## 文件与当前状态
 
@@ -20,9 +21,35 @@
 
 每个可以独立变更的角色、决定或约束分别使用稳定 id；更新或取消仍写该 id，提供最新项目 revision。取消记录是终态，不能再用原 id 改回 accepted；要提出新方案就使用新 id，并保留 supersedes 关系。旧别名和历史标题仍可查询到当前取消/替代状态，历史显式查询才展开旧修订。跨会话并发需要修订检查，不采用“最后写入覆盖”。源文件变了会标记待复核，而不是刷新摘要掩盖变化。
 
-Reverse 原 `scope.md`、`timeline.md`、`workitems.md`、Evidence，以及普通开发的代码/spec/ADR/test 仍是各自事实来源。本扩展只记录指针和续接知识，不批准授权、不另建任务系统、不代替 REA、Spec Kit 或 grilling。Reverse case 中的技术记录必须带 `caseRoot` 和 `targetSha256`（样本、提交或其他精确目标身份）；身份未知的技术记录不会进入当前恢复正文。detached HEAD 会记录具体 commit，而不是伪装成没有分支。
+Reverse 原 `scope.md`、`timeline.md`、`workitems.md`、Evidence，以及普通开发的代码/spec/ADR/test 仍是各自事实来源。本扩展只记录指针和续接知识，不批准授权、不另建任务系统、不代替 REA、Spec Kit 或 grilling。Reverse case 中的技术记录（包括 `kind=context`）必须显式带 `caseRoot` 和 `targetSha256`（样本、提交或其他精确目标身份）。case 必须是项目内已有、未链接的目录，并包含普通文件 `scope.md`。detached HEAD 会记录具体 commit，而不是伪装成没有分支。
 
-一次工具 succeeded 只说明该步骤结束，不说明业务成功。技术 claim 默认 candidate，不支持用 memory 工具直接写 validated。已初始化项目会在一轮结束时保存最近的模型自述和最近一次工具错误；自述明确标为待核对，工具错误带方法和参数摘要，不猜测根因。同一自述不重复保存。多个 case 未选定时跳过自动摘要，技术记录必须指定 case，避免混入全项目状态。
+Guided 信息放在新的 `record.pointers` 引用列表中；`context` 继续只保留 v1.1 的六个身份/条件字段。每个 pointer 只有 `role`、`path` 和可选的预期 `sha256`，不接受自由文本状态或权限值。例如，以下记录的文件都须已经存在：
+
+```json
+{
+  "id": "authorization-coverage",
+  "kind": "context",
+  "title": "部分覆盖，尚未闭合",
+  "text": "1/7 已核对，6 项未检查；具体结果与约束见来源。",
+  "context": {"caseRoot": "work/case-a", "targetSha256": "精确样本哈希或提交身份"},
+  "source": {"path": "work/case-a/Evidence.md"},
+  "pointers": [
+    {"role": "goal", "path": "work/case-a/scope.md"},
+    {"role": "phase", "path": "work/case-a/timeline.md"},
+    {"role": "evidence", "path": "work/case-a/Evidence.md"}
+  ]
+}
+```
+
+角色限定为 `goal`、`target`、`requestedOutput`、`scope`、`authorization`、`constraints`、`successCriteria`、`stopConditions`、`phase`、`decisionDelta`、`evidence`、`unknowns`、`blockers`、`delivery`。列表最多 16 项（含自动补入的 scope 引用），路径最多 512 字符，必须是选定 case 内现存文件的规范项目相对路径；拒绝绝对路径、遍历、符号链接/目录联接和硬链接文件。每个引用保存文件 SHA256，并自动包含 case 的 `scope.md`。更新已有 guided 记录须明确重传引用集合；移除旧引用须记录 `reason`，避免无意丢失约束。
+
+每次恢复分别检查 `record.source` 和所有 pointers。任一来源变化、缺失或路径变得不安全，记录就标为 `needs-review`，恢复不输出旧标题、原因或正文。自动恢复不从会话自述推断目标，只展示安全来源入口；显式 `continuity_search` 提供匹配的 case/target 后可查询记录和新鲜度。哈希未变只证明文件未变，不证明其中结论正确。
+
+已绑定身份的旧记录即使 case/scope 被移走，也可用相同 kind、case、target、branch 和新鲜项目/会话来源取消或退役；保留的引用只能使用原已存哈希，不能新增引用或复活事实。普通 active 保存仍要求现存 case。
+
+v1.1 日志继续可读，不重写旧日志。旧草稿中的自由文本 guided 字段保留为待复核历史，默认恢复隐藏其内容；新保存须改用 pointers，未知字段会明确拒绝而非静默丢弃。
+
+一次工具 succeeded 只说明该步骤结束，不说明业务成功。所有 claim 都是 candidate，不支持直接写 validated；默认自动恢复隔离其标题和正文，显式搜索仍可查看完整记录。已初始化项目会在一轮真正结束时独立保存最近模型自述和各个工具错误，同一自述不重复保存。自动收集不猜测 case/target，工具错误带方法、参数哈希和问题条件，并标为未归属尝试；它们不能充当某个 case 的证据，也不是永久禁用工具的规则。goal/scope/phase 等来源指针先于自动错误显示。失败条件的每个值在恢复展示中最多 160 字符，超出时明确标注省略并指向完整记录及来源；保存内容和显式搜索不因此截断。
 
 ## 安装与换机
 
@@ -50,6 +77,6 @@ node --test test/*.test.mjs
 
 离线夹具覆盖项目隔离、角色修改取消、历史别名/标题、来源变化、目标身份与 detached HEAD、写入冲突、中断事务恢复、有界上下文和 Pi 事件。工具失败会在 `tool_execution_start` 与 `tool_execution_end` 之间按 call id 配对，多个并行失败分别保留。
 
-真实宿主流程可用 `PI_SDK_DIR=<实际 pi-coding-agent 包目录> node scripts/verify-sdk.mjs` 复验。脚本加载该 SDK 和 bundled CLI，在隔离项目用本地模拟 provider 驱动真实 prompt、compact、tree、reload、resume 和 RPC 命令；不联网，不读取账号或修改用户配置，报告路径打印到终端。模拟 provider 验证生命周期与传给模型的上下文，不证明外部模型一定正确理解。外部模型抽样、实际 Web 页面加载与安装回执另行记录。
+真实宿主流程可用 `PI_SDK_DIR=<实际 pi-coding-agent 包目录> node scripts/verify-sdk.mjs` 复验。脚本加载该 SDK 和 bundled CLI，在隔离项目用本地模拟 provider 驱动真实工具调用/schema 校验、prompt、compact、tree、reload、resume 和 RPC 命令；不联网，不读取账号或修改用户配置，不创建 Git 提交，报告路径打印到终端。模拟 provider 验证生命周期与传给模型的上下文，不证明外部模型一定正确理解。外部模型抽样、实际 Web 页面加载与安装回执另行记录。
 
 实现来源与借鉴边界见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

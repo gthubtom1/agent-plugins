@@ -50,12 +50,13 @@ test('schema exports present', () => {
 });
 
 // --- resolveProject ---
-test('resolveProject: no project -> cwd fallback, exists=false', async () => {
+test('resolveProject: explicit uninitialized workspace stays local, exists=false', async () => {
   const dir = path.join(tmpRoot, 'resolve-none');
   await fsp.mkdir(dir, { recursive: true });
-  const r = await resolveProject(dir);
+  const r = await resolveProject(dir, { root: dir });
   assert.equal(r.exists, false);
-  assert.equal(r.root, dir);
+  // The Windows runner may expose TEMP through an 8.3 path alias.
+  assert.equal(r.root, await fsp.realpath(dir));
   assert.equal(r.revision, 0);
   assert.ok(r.workspaceKey.length > 0);
 });
@@ -231,6 +232,8 @@ test('20-day sim: old alias -> cancelled/superseded tombstone surfaced', async (
 test('lookup context filter excludes records from different case/branch/target', async () => {
   const { root } = await withProject('ctx-filter');
   await seedSource(root, 's.md', 's');
+  await seedSource(root, 'work/A/scope.md', 'case A');
+  await seedSource(root, 'work/B/scope.md', 'case B');
   let rev = 0;
   rev = (await saveRecord(root, mkInput({
     kind: 'attempt', id: 'attempt-a', title: 'attempt case A', status: 'failed',
@@ -478,11 +481,13 @@ test('renderRecovery does not inline raw source contents', async () => {
 test('renderRecovery with context: no guessing across cases', async () => {
   const { root } = await withProject('render-ctx');
   await seedSource(root, 's.md', 's');
+  await seedSource(root, 'work/A/scope.md', 'case A');
+  await seedSource(root, 'work/B/scope.md', 'case B');
   await saveRecord(root, mkInput({
-    kind: 'claim', status: 'candidate', title: 'A-only', context: { caseRoot: 'work/A', targetSha256: 'sample-a' }, source: { path: 's.md' },
+    kind: 'observation', status: 'observed', title: 'A-only', context: { caseRoot: 'work/A', targetSha256: 'sample-a' }, source: { path: 's.md' },
   }), { expectedRevision: 0 });
   await saveRecord(root, mkInput({
-    kind: 'claim', status: 'candidate', title: 'B-only', context: { caseRoot: 'work/B', targetSha256: 'sample-b' }, source: { path: 's.md' },
+    kind: 'observation', status: 'observed', title: 'B-only', context: { caseRoot: 'work/B', targetSha256: 'sample-b' }, source: { path: 's.md' },
   }), { expectedRevision: 1 });
   const renderA = await renderRecovery(root, { context: { caseRoot: 'work/A', targetSha256: 'sample-a' } });
   assert.ok(renderA.includes('A-only'));
@@ -617,14 +622,36 @@ test('results limit respected', async () => {
 test('context record points existing case/workitem, not second task state', async () => {
   const { root } = await withProject('ctx-record');
   await seedSource(root, 's.md', 's');
+  await seedSource(root, 'work/A/scope.md', 'case A');
+  const context = { caseRoot: 'work/A', targetSha256: 'sample-a' };
   await saveRecord(root, mkInput({
     kind: 'context', id: 'case-A', title: 'case A active', status: 'active',
-    context: { caseRoot: 'work/A' }, source: { path: 's.md' },
+    context, source: { path: 's.md' },
   }), { expectedRevision: 0 });
-  const r = (await lookup(root, { id: 'case-A' })).records[0].record;
+  const r = (await lookup(root, { id: 'case-A', context })).records[0].record;
   assert.equal(r.kind, 'context');
   assert.equal(r.status, 'active');
   assert.equal(r.context.caseRoot, 'work/A');
+});
+
+test('guided reverse context is bounded and appears in recovery without becoming authority', async () => {
+  const { root } = await withProject('guided-context');
+  await seedSource(root, 's.md', 'guided source');
+  await seedSource(root, 'work/A/scope.md', 'GOAL-RECONSTRUCT; SCOPE-WORKCOPY; DELIVERY-CORE');
+  await seedSource(root, 'work/A/timeline.md', 'behavior-model phase; online flow unknown');
+  await saveRecord(root, mkInput({
+    kind: 'context', id: 'guided-reverse', title: 'current guided reverse context', status: 'active',
+    text: 'Recovery pointer only.',
+    context: { caseRoot: 'work/A', targetSha256: 'sample-a' },
+    pointers: [{ role: 'goal', path: 'work/A/scope.md' }, { role: 'phase', path: 'work/A/timeline.md' },
+      { role: 'delivery', path: 'work/A/scope.md' }], source: { path: 's.md' },
+  }), { expectedRevision: 0 });
+  const recovery = await renderRecovery(root, { context: { caseRoot: 'work/A', targetSha256: 'sample-a' } });
+  assert.match(recovery, /goal: work\/A\/scope.md/);
+  assert.match(recovery, /phase: work\/A\/timeline.md/);
+  assert.match(recovery, /delivery: work\/A\/scope.md/);
+  assert.doesNotMatch(recovery, /GOAL-RECONSTRUCT|behavior-model/);
+  assert.match(recovery, /\[active\]/);
 });
 
 test('ContinuityError exported with code', () => {

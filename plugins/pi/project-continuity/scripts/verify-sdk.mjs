@@ -11,7 +11,8 @@
 // not only as a notification.
 //
 // No external model, network, installs, deployment, global settings/credentials, or writes outside
-// the scratch directory. The report is written outside the plugin tree.
+// the scratch directory and the explicitly selected report path.
+// Temporary fixture repositories do not create commits.
 //
 // Required:
 //   PI_SDK_DIR=<.../@earendil-works/pi-coding-agent>   (or PI_WEB_RUNTIME)
@@ -60,6 +61,7 @@ const requests = [];
 let currentPhase = 'setup';
 let requestSeq = 0;
 let providerSeq = 0;
+let queuedToolCall;
 let scratch;
 let projectDir;
 let agentDir;
@@ -83,11 +85,7 @@ function git(args, cwd = projectDir) {
 
 function initializeGitFixture() {
   git(['init']);
-  git(['config', 'user.email', 'fixture@example.invalid']);
-  git(['config', 'user.name', 'Fixture']);
-  git(['checkout', '-b', 'fixture-main']);
-  git(['add', 'probe.txt']);
-  git(['commit', '-m', 'fixture baseline']);
+  git(['symbolic-ref', 'HEAD', 'refs/heads/fixture-main']);
   return git(['symbolic-ref', '--quiet', '--short', 'HEAD']);
 }
 
@@ -238,7 +236,28 @@ async function createModelRuntime(ai, credentialStore, onRequest) {
     refreshOnCreate: false,
   });
   const { makeProvider } = await import(pathToFileURL(FIXTURE_ENTRY).href);
-  modelRuntime.registerProvider('fixture', makeProvider(ai.createAssistantMessageEventStream, { onRequest }));
+  const provider = makeProvider(ai.createAssistantMessageEventStream, { onRequest });
+  const textResponse = provider.streamSimple;
+  provider.streamSimple = (model, context) => {
+    if (!queuedToolCall) return textResponse(model, context);
+    const call = queuedToolCall;
+    queuedToolCall = undefined;
+    onRequest({ isSummary: false, model: { provider: model.provider, id: model.id },
+      messages: JSON.parse(JSON.stringify(context.messages)), responseText: `fixture tool call: ${call.name}` });
+    const stream = ai.createAssistantMessageEventStream();
+    const message = { role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: 'pending', timestamp: Date.now() };
+    stream.push({ type: 'start', partial: message });
+    message.content.push(call);
+    stream.push({ type: 'toolcall_start', contentIndex: 0, partial: message });
+    stream.push({ type: 'toolcall_end', contentIndex: 0, toolCall: call, partial: message });
+    message.stopReason = 'toolUse';
+    stream.push({ type: 'done', reason: 'toolUse', message });
+    return stream;
+  };
+  modelRuntime.registerProvider('fixture', provider);
   const model = modelRuntime.getModel('fixture', 'fixture-model');
   if (!model) throw new Error('fixture model was not registered');
   return { modelRuntime, model };
@@ -311,6 +330,20 @@ async function executeTool(session, name, params) {
   const definition = session.extensionRunner.getToolDefinition(name);
   if (!definition?.execute) throw new Error(`tool definition missing: ${name}`);
   return definition.execute(`verify-${++requestSeq}`, params, undefined, undefined, toolContext(session));
+}
+
+async function executeValidatedTool(session, name, params) {
+  // The SDK requires an actual assistant-issued call, not a synthetic parent id.
+  // Queue exactly one deterministic provider tool call; native follow-up settles
+  // normally and the tool result retains Pi's schema/execution error marker.
+  if (queuedToolCall) throw new Error('fixture dispatch already pending');
+  const call = { type: 'toolCall', id: `fixture-call-${++requestSeq}`, name, arguments: params };
+  queuedToolCall = call;
+  try { await session.prompt(`fixture validation dispatch ${call.id}`); }
+  finally { queuedToolCall = undefined; }
+  const result = session.messages.findLast(m => m.role === 'toolResult' && m.toolCallId === call.id);
+  if (!result) throw new Error('SDK did not persist the fixture tool result');
+  return result;
 }
 
 function parseToolJson(result) {
@@ -636,6 +669,7 @@ async function main() {
     const status0 = await getStatus(session);
     expectEqual(status0.initialized, false, 'fresh project starts uninitialized');
     expectEqual(status0.revision, 0, 'fresh revision is 0');
+    expectEqual(status0.automatic_candidates, true, 'new session defaults to automatic candidate capture');
 
     markPhase('save-accepted');
     await saveRecord(session, {
@@ -645,12 +679,22 @@ async function main() {
     const statusAccepted = await getStatus(session);
     expect(statusAccepted.initialized === true, 'save accepted initialized project');
     expect(statusAccepted.revision >= 1, 'save accepted advanced revision', `actual=${statusAccepted.revision}`);
+    const falseCandidate = await executeValidatedTool(session, 'continuity_save', {
+      expectedRevision: statusAccepted.revision,
+      record: { id: 'false-success', kind: 'claim', title: 'FALSE_SUCCESS_ALL_SEVEN_VERIFIED',
+        text: 'FALSE_SUCCESS_AUTHORIZATION_UNLIMITED', source: { path: 'probe.txt' } },
+    });
+    expect(!falseCandidate.isError, 'real SDK accepts a candidate record through schema validation', JSON.stringify(falseCandidate));
 
     const initialRequest = await promptPhase(session, 'fresh-accepted', 'fixture phase fresh-accepted');
     const initialText = continuityText(initialRequest.messages);
     expectIncludes(initialText, '[accepted] (route-choice)', 'accepted record visible before cancellation');
     expectIncludes(initialText, OLD_TEXT, 'old active text visible before cancellation');
     expectNotIncludes(initialText, '[cancelled] (route-choice)', 'cancelled record absent before cancellation');
+    expectNotIncludes(initialText, 'FALSE_SUCCESS_ALL_SEVEN_VERIFIED', 'automatic context quarantines candidate titles');
+    expectNotIncludes(initialText, 'FALSE_SUCCESS_AUTHORIZATION_UNLIMITED', 'automatic context quarantines candidate bodies');
+    const candidateSearch = parseToolJson(await executeValidatedTool(session, 'continuity_search', { id: 'false-success' }));
+    expectEqual(candidateSearch.current?.status, 'candidate', 'explicit validated search can inspect quarantined claim');
     const baselineToolSignature = toolSignature(initialRequest.messages);
     checkToolSignature(initialRequest, baselineToolSignature, 'fresh-accepted');
     expect(initialText.length <= 6500, 'fresh-accepted: continuity block <= 6500 chars', `actual=${initialText.length}`);
@@ -703,6 +747,13 @@ async function main() {
     checkToolSignature(afterTreeRequest, baselineToolSignature, 'after-tree');
     expectCancellationContext(afterTreeRequest, 'after-tree');
 
+    await session.prompt('/continuity candidates off');
+    expectEqual((await getStatus(session)).automatic_candidates, false, 'candidate capture command turns narration off');
+    await session.prompt('/continuity candidates on extra');
+    expectEqual((await getStatus(session)).automatic_candidates, false, 'invalid candidate command does not change state');
+    const usageMessage = session.messages.filter(m => m.role === 'custom' && m.customType === 'project-continuity-status').at(-1);
+    expectIncludes(messageText(usageMessage), '用法', 'invalid command reports usage without an extension error');
+
     markPhase('reload');
     const beforeReload = requests.length;
     await session.reload();
@@ -712,10 +763,16 @@ async function main() {
     expect(reloadEvents.includes('session_start:reload'), 'session_start:reload fired');
     expect(reloadEvents.includes('resources_discover:reload'), 'resources_discover:reload fired');
     expectActiveTools(session, 'reload');
+    expectEqual((await getStatus(session)).automatic_candidates, false, 'candidate off persists across real SDK reload');
+    const failedCall = await executeValidatedTool(session, 'fixture_missing_tool', {});
+    expectEqual(failedCall.isError, true, 'real SDK reports an unknown-tool failure through finalized tool events');
 
     const afterReloadRequest = await promptPhase(session, 'after-reload', 'fixture phase after-reload');
     checkToolSignature(afterReloadRequest, baselineToolSignature, 'after-reload');
     expectCancellationContext(afterReloadRequest, 'after-reload');
+    const errorsWhileOff = parseToolJson(await executeValidatedTool(session, 'continuity_search', { query: '工具失败' }));
+    expect(errorsWhileOff.records.some(item => item.current?.capture === 'tool-error' && item.current.status === 'failed'), 'candidate off retains conditional tool errors after a real run');
+    expect(errorsWhileOff.records.every(item => !item.current.context?.targetSha256), 'tool errors do not fabricate a target');
 
     markPhase('command');
     const beforeCommand = requests.length;
@@ -756,6 +813,9 @@ async function main() {
     expectEqual(resumed.extensionErrors.length, 0, 'resume extension errors empty', JSON.stringify(resumed.extensionErrors));
     expect(phaseEventNames('resume-open').includes('session_start:resume'), 'session_start:resume fired');
     expectActiveTools(resumed.session, 'resume-open');
+    expectEqual((await getStatus(resumed.session)).automatic_candidates, false, 'candidate off survives persisted session resume');
+    await resumed.session.prompt('/continuity candidates on');
+    expectEqual((await getStatus(resumed.session)).automatic_candidates, true, 'candidate on re-enables capture after resume');
 
     const resumeRequest = await promptPhase(resumed.session, 'resume-prompt', 'fixture phase resume');
     checkToolSignature(resumeRequest, baselineToolSignature, 'resume-prompt');
@@ -763,13 +823,13 @@ async function main() {
     expectNoStaleStatus(resumeRequest, 'resume-prompt');
 
     markPhase('branch-feature');
-    git(['checkout', '-b', 'fixture-feature']);
+    git(['symbolic-ref', 'HEAD', 'refs/heads/fixture-feature']);
     const featureRequest = await promptPhase(resumed.session, 'branch-feature', 'fixture phase branch-feature');
     checkToolSignature(featureRequest, baselineToolSignature, 'branch-feature');
     expectNoRouteChoice(featureRequest, 'branch-feature');
 
     markPhase('branch-main');
-    git(['checkout', initialBranch]);
+    git(['symbolic-ref', 'HEAD', `refs/heads/${initialBranch}`]);
     const branchBackRequest = await promptPhase(resumed.session, 'branch-main', 'fixture phase branch-main');
     checkToolSignature(branchBackRequest, baselineToolSignature, 'branch-main');
     expectCancellationContext(branchBackRequest, 'branch-main');
@@ -789,9 +849,69 @@ async function main() {
     expect(claims.length >= 1, 'search finds automatic session claims');
     expect(claims.every((item) => item.history?.length === 1), 'automatic session claims saved once, not repeatedly', JSON.stringify(claims.map((item) => ({ id: item.current?.id, history: item.history?.length }))));
 
+    markPhase('guided-sources');
+    for (const name of ['a', 'b']) {
+      await mkdir(path.join(projectDir, 'work', name), { recursive: true });
+      await writeFile(path.join(projectDir, 'work', name, 'scope.md'), `fixture case ${name}: isolated copy only; seven required surfaces`);
+    }
+    const evidencePath = path.join(projectDir, 'work/a/Evidence.md');
+    await writeFile(evidencePath, '1/7 verified; 6 unexamined; aggregate incomplete');
+    const identity = { caseRoot: 'work/a', targetSha256: 'a'.repeat(64) };
+    const guidedRecord = { id: 'guided-coverage', kind: 'context', status: 'active',
+      title: 'Fixture partial coverage', text: '1/7 verified; 6 unexamined; aggregate incomplete',
+      source: { path: 'probe.txt' }, context: identity,
+      pointers: [{ role: 'goal', path: 'work/a/scope.md' }, { role: 'evidence', path: 'work/a/Evidence.md' }] };
+    const guidedRevision = (await getStatus(resumed.session)).revision;
+    const savedGuided = await executeValidatedTool(resumed.session, 'continuity_save', { expectedRevision: guidedRevision, record: guidedRecord });
+    expect(!savedGuided.isError, 'real SDK accepts bounded guided pointers');
+    const badSchema = await executeValidatedTool(resumed.session, 'continuity_save', {
+      expectedRevision: (await getStatus(resumed.session)).revision,
+      record: { ...guidedRecord, pointers: [{ role: 'scope', path: 'work/a/scope.md', authorization: 'unlimited' }] },
+    });
+    expectEqual(badSchema.isError, true, 'real SDK rejects extra free-form authority in pointer schema');
+    const missingTarget = await executeValidatedTool(resumed.session, 'continuity_save', {
+      expectedRevision: (await getStatus(resumed.session)).revision,
+      record: { ...guidedRecord, context: { caseRoot: 'work/a' } },
+    });
+    expectEqual(missingTarget.isError, true, 'real SDK rejects guided context without explicit target');
+    const unknownTargetRequest = await promptPhase(resumed.session, 'guided-unknown-target', 'fixture continue with identity not selected');
+    const unknownText = continuityText(unknownTargetRequest.messages);
+    expectIncludes(unknownText, 'work/a/Evidence.md', 'automatic recovery offers guided source pointers');
+    expectNotIncludes(unknownText, '1/7 verified', 'automatic recovery with unknown target withholds coverage facts');
+    expectNotIncludes(unknownText, 'Fixture partial coverage', 'automatic recovery withholds guided title with unknown target');
+    const exact = parseToolJson(await executeValidatedTool(resumed.session, 'continuity_search', { id: 'guided-coverage', context: identity }));
+    expectIncludes(exact.current?.text, '1/7 verified', 'explicit identity restores partial coverage record');
+    expectEqual(exact.records[0].needsReview, false, 'all guided source hashes initially unchanged');
+    const wrong = parseToolJson(await executeValidatedTool(resumed.session, 'continuity_search', { id: 'guided-coverage', context: { ...identity, targetSha256: 'b'.repeat(64) } }));
+    expectEqual(wrong.records.length, 0, 'SDK search excludes mismatched target');
+    const wrongCase = parseToolJson(await executeValidatedTool(resumed.session, 'continuity_search', { id: 'guided-coverage', context: { ...identity, caseRoot: 'work/b' } }));
+    expectEqual(wrongCase.records.length, 0, 'SDK search excludes mismatched case');
+    await writeFile(evidencePath, 'Regression: gate 1 reopened; 0/7 verified; six unexamined');
+    const stale = parseToolJson(await executeValidatedTool(resumed.session, 'continuity_search', { id: 'guided-coverage', context: identity }));
+    expectEqual(stale.records[0].staleSource, false, 'unrelated record.source remains unchanged');
+    expectEqual(stale.records[0].needsReview, true, 'changed Evidence pointer independently invalidates recovery');
+    const staleRequest = await promptPhase(resumed.session, 'guided-stale-evidence', 'fixture stale Evidence recovery');
+    expectIncludes(continuityText(staleRequest.messages), 'needs-review', 'real provider context shows stale pointer warning');
+    expectNotIncludes(continuityText(staleRequest.messages), '1/7 verified', 'real provider context omits stale coverage');
+    const updatedGuided = await executeValidatedTool(resumed.session, 'continuity_save', {
+      expectedRevision: (await getStatus(resumed.session)).revision,
+      record: { ...guidedRecord, title: 'Fixture regression reopened', text: '0/7 verified; gate 1 reopened; six unexamined' },
+    });
+    expect(!updatedGuided.isError, 'regression can revise the same stable guided id');
+    const regression = parseToolJson(await executeValidatedTool(resumed.session, 'continuity_search', { id: 'guided-coverage', context: identity, history: true }));
+    expectEqual(regression.records[0].history.length, 2, 'regression preserves the previous partial record as history');
+    expectIncludes(regression.current?.text, '0/7 verified', 'current record is the reopened regression');
+    expectEqual(regression.records[0].needsReview, false, 'updated Evidence hash is fresh without claiming semantic verification');
+    expectEqual(fresh.extensionErrors.length, 0, 'SDK lifecycle produced no extension handler errors');
+    expectEqual(resumed.extensionErrors.length, 0, 'resumed guided lifecycle produced no extension handler errors');
+
     markPhase('adopt-before');
     const movedDir = path.join(scratch, 'project-moved');
     await cp(projectDir, movedDir, { recursive: true, force: true, filter: (src) => !src.split(path.sep).includes('.git') });
+    // Give this copied fixture an explicit branch, so a TMP directory nested
+    // inside a developer checkout cannot lend it an unrelated parent branch.
+    git(['init'], movedDir);
+    git(['symbolic-ref', 'HEAD', `refs/heads/${initialBranch}`], movedDir);
     const moved = await createTestSession({
       label: 'adopt',
       cwd: movedDir,

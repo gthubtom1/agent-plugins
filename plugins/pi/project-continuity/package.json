@@ -1,6 +1,6 @@
 {
   "name": "@toti/pi-project-continuity",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Project-local continuity for Pi: bounded recovery, source-linked records, revisions, cancelled decisions and conditional attempt recall. No database or background LLM.",
   "type": "module",
   "license": "MIT",
