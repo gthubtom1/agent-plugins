@@ -1,9 +1,14 @@
 // Path normalisation shared by every rule. Pure functions, no I/O.
+//
+// Resolution is lexical rather than host-dependent: the same Windows-style input
+// must classify identically on Linux CI, where `node:path` would treat `D:/x` as
+// a relative name.
 import os from 'node:os';
 import path from 'node:path';
 
 const WINDOWS_ABS = /^[a-zA-Z]:[\\/]/;
 const UNC = /^\\\\/;
+const BACKSLASH = String.fromCharCode(92);
 
 export const HOME = os.homedir();
 export const TMP = os.tmpdir();
@@ -30,21 +35,43 @@ export function stripTrailingSep(p) {
   return s.replace(/\/+$/, '');
 }
 
+/** Collapse `.` and `..` lexically, keeping drive letters and leading slashes. */
+export function normalisePath(input) {
+  const s = toPosix(String(input ?? ''));
+  const drive = /^[a-zA-Z]:/.exec(s);
+  const prefix = drive ? drive[0].toUpperCase() : s.startsWith('/') ? '/' : '';
+  const rest = drive ? s.slice(2) : s.startsWith('/') ? s.slice(1) : s;
+  const parts = [];
+  for (const part of rest.split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (parts.length && parts[parts.length - 1] !== '..') parts.pop();
+      else if (!prefix) parts.push('..');
+      continue;
+    }
+    parts.push(part);
+  }
+  const joined = parts.join('/');
+  if (drive) return joined ? `${prefix}/${joined}` : `${prefix}/`;
+  if (prefix === '/') return `/${joined}`;
+  return joined || '.';
+}
+
 /**
  * Resolve one target token (as typed) into a normalised absolute path.
  * Returns { path } or { dynamic: true, raw } when the token cannot be resolved
- * statically (variables, command substitution, ~user, unknown globs at root).
+ * statically (variables, command substitution, unknown globs at root).
  */
 export function resolveTarget(token, cwd = process.cwd(), home = HOME) {
   let t = String(token ?? '').trim().replace(/^['"]|['"]$/g, '');
   if (!t) return null;
-  if (t === '~' || t === '$HOME' || t === '${HOME}' || t === '%USERPROFILE%') return { path: home };
-  if (t.startsWith('~/') || t.startsWith('~\\')) return { path: stripTrailingSep(path.normalize(path.resolve(home, t.slice(2)))) };
+  if (t === '~' || t === '$HOME' || t === '${HOME}' || t === '%USERPROFILE%') return { path: normalisePath(home) };
+  if (t.startsWith('~/') || t.startsWith(`~${BACKSLASH}`)) return { path: normalisePath(`${home}/${t.slice(2)}`) };
   if (/\$\(|`|\$\{|\$[A-Za-z_]|%[A-Za-z_]+%/.test(t)) return { dynamic: true, raw: t };
   if (t === '-' || t === '--') return { dynamic: true, raw: t };
   t = msysToWin(t);
-  const absolute = isAbsoluteAny(t) ? t : path.resolve(cwd, t);
-  return { path: stripTrailingSep(path.normalize(absolute)) };
+  const absolute = isAbsoluteAny(t) ? t : `${cwd}/${t}`;
+  return { path: stripTrailingSep(normalisePath(absolute)) };
 }
 
 export function isDriveRoot(p) {
@@ -58,10 +85,11 @@ export function isHomeRoot(p, home = HOME) {
 
 export function isUncRoot(p) {
   const raw = String(p);
-  if (!raw.startsWith('//') && !raw.startsWith('\\')) return false;
+  const s = toPosix(raw);
+  const isUnc = s.startsWith('//') || raw.startsWith('\\\\');
+  if (!isUnc) return false;
   // //server/share is a share root; anything deeper is a normal directory.
-  const parts = toPosix(raw).replace(/^\/+/, '').split('/').filter(Boolean);
-  return parts.length <= 2;
+  return s.replace(/^\/+/, '').split('/').filter(Boolean).length <= 2;
 }
 
 const SYSTEM_DIRS = /^[a-z]:\/(windows|program files|program files \(x86\)|programdata|\$recycle\.bin|system volume information)(\/|$)/;

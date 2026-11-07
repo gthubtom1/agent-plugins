@@ -3,7 +3,7 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
-  test:
+  shell-guard:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
