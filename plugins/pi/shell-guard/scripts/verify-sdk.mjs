@@ -200,6 +200,10 @@ async function main() {
   check('whole-disk-search blocked', toolError(findResult), messageText(findResult).slice(0, 200));
   check('whole-disk-search reason mentions alternative', /search_files|rg -n/.test(messageText(findResult)));
 
+  // 1b. the same search wrapped in `timeout` must also be blocked (live-found bypass)
+  const wrapped = await dispatch('bash', { command: 'timeout 5 find / -maxdepth 2 -name "__guard_marker__" -type f' });
+  check('timeout-wrapped whole-disk search blocked', toolError(wrapped), messageText(wrapped).slice(0, 200));
+
   // 2. drive-root deletion is blocked
   const rmResult = await dispatch('bash', { command: 'rm -rf /' });
   check('drive-root delete blocked', toolError(rmResult), messageText(rmResult).slice(0, 200));

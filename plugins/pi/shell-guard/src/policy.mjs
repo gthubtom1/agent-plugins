@@ -16,6 +16,36 @@ import { clampExplicit, classify } from './rules/timeout.mjs';
 
 const CLASS_RANK = { fast: 0, default: 1, heavy: 2 };
 
+// `timeout 5 find / ...` must be judged as `find`, not as `timeout`. The same is
+// true for env/nice/nohup wrappers, which would otherwise be a trivial bypass.
+const WRAPPERS = new Set(['timeout', 'env', 'command', 'nice', 'ionice', 'stdbuf', 'time', 'nohup', 'builtin']);
+
+function unwrap(program, args) {
+  let name = program;
+  let rest = args.slice();
+  for (let depth = 0; depth < 6; depth += 1) {
+    if (!WRAPPERS.has(name)) break;
+    // `command -v pwsh` is a lookup, not an execution; unwrapping it would make
+    // the shell look like a bare REPL.
+    if (name === 'command' && rest.some((token) => token === '-v' || token === '-V')) break;
+    let i = 0;
+    if (name === 'timeout') {
+      while (i < rest.length && rest[i].startsWith('-')) i += 1;
+      i += 1; // the duration token
+    } else if (name === 'env') {
+      while (i < rest.length && (rest[i].startsWith('-') || /^[^=\s]+=[^=]*$/.test(rest[i]))) i += 1;
+    } else if (name === 'nice' || name === 'ionice' || name === 'stdbuf' || name === 'time') {
+      while (i < rest.length && (rest[i].startsWith('-') || /^\d+$/.test(rest[i]))) i += 1;
+    } else {
+      while (i < rest.length && rest[i].startsWith('-')) i += 1;
+    }
+    if (i >= rest.length) break;
+    name = programName(rest[i]);
+    rest = rest.slice(i + 1);
+  }
+  return { program: name, args: rest };
+}
+
 export function evaluate(command, input = {}) {
   const base = normalizeOptions(input);
   // Grants come from the user's own message for this turn, never from the model.
@@ -49,12 +79,17 @@ export function evaluate(command, input = {}) {
   for (const [index, segment] of segments.entries()) {
     const tokens = words(segment.text);
     if (!tokens.length) continue;
-    const program = programName(tokens[0]);
-    const args = tokens.slice(1);
+    const outerProgram = programName(tokens[0]);
+    const outerArgs = tokens.slice(1);
+    const inner = unwrap(outerProgram, outerArgs);
+    const program = inner.program;
+    const args = inner.args;
 
     for (const candidate of [
       checkDelete(program, args, options),
       checkIndirectDelete(program, args, options),
+      // xargs/git clean are judged on the outer command; they read a child later.
+      checkIndirectDelete(outerProgram, outerArgs, options),
       program === 'git' && args[0] === 'clean' ? checkGitClean(args.slice(1), options) : null,
       checkWholeDiskSearch(program, args, options),
       checkInteractive(program, args, options, { index, piped: index > 0 }),

@@ -215,3 +215,21 @@ test('junction targets are judged by their real path', () => {
   expect('rm -rf link', { action: 'block', tier: 'T3' }, { realpath });
   expect('rm -rf notes.txt', { action: 'allow' }, { realpath });
 });
+
+test('wrapper commands are unwrapped before judging', () => {
+  // The live UI test found this bypass: the guard saw `timeout`, not `find`.
+  expect('timeout 5 find / -maxdepth 3 -name x', { action: 'block', rule: 'whole-disk-search' });
+  expect('env FOO=1 find / -name x', { action: 'block', rule: 'whole-disk-search' });
+  expect('timeout 10 rm -rf /', { action: 'block', tier: 'T3' });
+  expect('nohup python', { action: 'block', rule: 'bare-repl' });
+
+  expect('timeout 60 python script.py', { action: 'allow' });
+  assert.equal(run('timeout 60 python script.py').timeout, 900);
+  expect('nice -n 10 rg token .', { action: 'allow' });
+  expect('env PATH=/usr/bin node -e "1"', { action: 'allow' });
+});
+
+test('command -v is a lookup, not an execution', () => {
+  expect('command -v pwsh || command -v powershell || true', { action: 'allow' });
+  expect('command -v python3', { action: 'allow' });
+});
