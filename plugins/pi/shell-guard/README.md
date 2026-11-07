@@ -80,6 +80,14 @@ T2 不是一律拦截。只有当**你自己的那条消息**里同时满足下�
 
 `es.exe` 必须配置绝对路径且 Everything 正在运行；缺失时工具降级并明确报错，不会把"没找到"当成事实。
 
+配置从 `pi.getSettings()` 读取，写入 `settings.json` 顶层：
+
+```json
+{ "shellGuard": { "everything": { "esPath": "D:/Tools/es/es.exe", "maxResults": 50 } } }
+```
+
+注意 Everything 会把 `.` 当作分隔符：查 `es.exe` 会命中 `services.exe`、`Clockres.exe` 之类的子串。要精确匹配请用 `regex: true` 或带路径的查询。
+
 ## 配置
 
 ```json

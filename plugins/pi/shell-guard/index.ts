@@ -55,10 +55,15 @@ export default function shellGuard(pi: ExtensionAPI) {
 
   const readSettings = (): Settings => {
     try {
-      const settings = (pi as unknown as { settings?: { shellGuard?: Settings } }).settings?.shellGuard;
-      if (settings && typeof settings === "object") return settings;
+      const all = (pi as unknown as { getSettings?: () => { shellGuard?: Settings } }).getSettings?.();
+      if (all?.shellGuard && typeof all.shellGuard === "object") {
+        const esPath = process.env.PI_SHELL_GUARD_ES;
+        return esPath
+          ? { ...all.shellGuard, everything: { ...all.shellGuard.everything, esPath } }
+          : all.shellGuard;
+      }
     } catch {
-      // ignore
+      // fall through to the environment override
     }
     const esPath = process.env.PI_SHELL_GUARD_ES;
     return esPath ? { everything: { esPath } } : {};

@@ -12,6 +12,10 @@ First cut: pure policy library plus command corpus. Runtime wiring exists but is
 - Everything CLI helpers (argument building, JSON parsing) for the planned `search_files` tool.
 - 20 offline tests over a command corpus including the original failing `find /` command.
 
+### Live host fix (0.1.0)
+
+- Settings were read through an undocumented field, so `shellGuard.everything.esPath` never applied and `search_files` always reported "not configured". Now uses the documented `pi.getSettings()`, with `PI_SHELL_GUARD_ES` as an override.
+
 ### SDK verification and search_files (0.1.0)
 
 - `scripts/verify-sdk.mjs`: real Pi SDK + deterministic in-process provider; 15 checks covering blocked whole-disk search, blocked drive-root delete, blocked bare REPL, allowed command with injected 60 s timeout, unnamed delete refused and not executed, user-named delete executed, grant not widening to a second path, and a live `search_files` query.
