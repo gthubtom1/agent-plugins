@@ -35,8 +35,7 @@ cp retry-level/retry-level.ts        ~/.pi/agent/extensions/
 
 ```
 
-> `pi-seep-ext` 与 `pi-prompt-compat` 是**多文件包**，不要手工拷单个文件。
-> 提示词插件单装用 `pi install <仓库路径>/plugins/pi/pi-prompt-compat`。
+> `pi-seep-ext` 是**多文件包**，不要手工拷单个文件。
 
 装完**新开一个会话**生效（扩展在会话启动时加载）。
 
@@ -51,7 +50,6 @@ cp retry-level/retry-level.ts        ~/.pi/agent/extensions/
 | `pi-seep-ext · remote` | **手机连上**：局域网/Tailscale 地址、终端二维码、运行期生成密码、5 行自检；不改 pi-web | `/remote` | 🟢 生产就绪 | [查看](pi-seep-ext/README.md) |
 | `cmd-guard` | **命令执行守卫**：自动补 timeout / 物理拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看](cmd-guard/README.md) |
 | `retry-level` | **重试档位**：菜单切档（off/3/5/10/15/30/无限），状态栏常显且可点，无限档可 Esc 中断 | `/retry` | 🟢 生产就绪 | [查看](retry-level/README.md) |
-| `pi-prompt-compat` | **人格与粘性规则兼容层**：PERSONALITY.md + RULES.md 跨轮次常驻 | `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看](pi-prompt-compat/README.md) |
 
 
 ---
