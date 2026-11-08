@@ -80,30 +80,25 @@ test('Everything failures and invalid output are errors, never false empty resul
 test('Everything autostart is opt-in and retries the exact CLI once after IPC failure',async()=>{
   const es=process.platform==='win32'?'D:/fixture/es.exe':'/fixture/es';
   const gui=process.platform==='win32'?'D:/fixture/Everything.exe':'/fixture/everything';
-  const calls=[];const spawnCalls=[];let cliAttempts=0;let unrefCalls=0;let killCalls=0;
+  const calls=[];let cliAttempts=0;
   const executeFile=async(exe,args,opts)=>{
     calls.push({exe,args:[...args],opts});
     if(exe===es && ++cliAttempts===1){const error=new Error('Everything IPC window not found');error.code=1;error.stderr='Everything IPC not available';throw error;}
+    if(exe===gui){const error=new Error('GUI launch timeout');error.code='ETIMEDOUT';throw error;}
     return {stdout:JSON.stringify([{filename:'D:/fixture/result.txt'}])};
   };
-  const spawnFile=(exe,args,opts)=>{
-    spawnCalls.push({exe,args:[...args],opts});
-    const child={once(event,handler){if(event==='spawn')queueMicrotask(handler);return child;},unref(){unrefCalls++;},kill(){killCalls++;}};
-    return child;
-  };
-  const f=fixture({settings:{everything:{esPath:es,guiPath:gui,autostart:true}},executeFile,spawn:spawnFile});
+  const f=fixture({settings:{everything:{esPath:es,guiPath:gui,autostart:true}},executeFile});
   const params={query:'result.txt',limit:7};
   const got=await f.tools.get('search_files').execute('x',params);
   assert.equal(got.details.count,1);
   assert.deepEqual(calls.map(({exe,args})=>({exe,args})),[
     {exe:es,args:['-n','7','-json','result.txt']},
+    {exe:gui,args:[]},
     {exe:es,args:['-n','7','-json','result.txt']},
   ]);
-  assert.equal(calls[0].opts.shell,false);assert.equal(calls[1].opts.shell,false);
-  assert.deepEqual(spawnCalls.map(({exe,args})=>({exe,args})),[{exe:gui,args:[]}]);
-  assert.equal(spawnCalls[0].opts.shell,false);assert.equal(spawnCalls[0].opts.detached,true);
-  assert.equal(spawnCalls[0].opts.stdio,'ignore');assert.equal(unrefCalls,1);assert.equal(killCalls,0);
-  assert.deepEqual(calls[0].args,calls[1].args);
+  assert.equal(calls[0].opts.shell,false);assert.equal(calls[1].opts.shell,false);assert.equal(calls[2].opts.shell,false);
+  assert.equal(calls[1].opts.timeout,5000);
+  assert.deepEqual(calls[0].args,calls[2].args);
 });
 
 test('Everything autostart never starts GUI for disabled, malformed, invalid-output or unrelated failures',async()=>{
@@ -140,5 +135,5 @@ test('Everything paths and autostart settings are validated before execution',as
   await f.tools.get('search_files').execute('x',{query:'fixture'});
 });test('status command reports loaded module and version without external requests',async()=>{
   const f=fixture();await f.commands.get('shell-guard').handler('status',f.ctx);
-  const data=JSON.parse(f.messages[0].content);assert.equal(data.version,'0.2.1');assert.match(data.module,/runtime.mjs/);assert.match(data.boundary,/not an OS sandbox/);
+  const data=JSON.parse(f.messages[0].content);assert.equal(data.version,'0.2.2');assert.match(data.module,/runtime.mjs/);assert.match(data.boundary,/not an OS sandbox/);
 });

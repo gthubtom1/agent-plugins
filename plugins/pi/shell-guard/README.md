@@ -6,7 +6,7 @@
 
 安装器以精确公共 release commit 和插件目录树摘要安装本包，**只注册 `plugins/pi/shell-guard`，不要安装整个 hub**。安装器的 shell-guard 选项默认关闭，明确启用后后续更新保留选择。源码试用安装不能替代冻结身份。
 
-本包维护的版本为 **0.2.1**。0.1.0 是最初试用版本；0.2.0 修正了复核发现的授权、异常处理、路径及输出问题；0.2.1 放宽了有限的信息查询形式，并支持 Everything 服务不可用时启动已配置的 GUI 后重试。具体发布和宿主验证以 CHANGELOG 与安装器回执为准。
+本包维护的版本为 **0.2.2**。0.1.0 是最初试用版本；0.2.0 修正了复核发现的授权、异常处理、路径及输出问题；0.2.1 放宽了有限的信息查询形式，并增加了 Everything GUI 自动启动；0.2.2 将自动启动流程简化为一次有界 GUI 启动调用和一次精确查询重试。具体发布和宿主验证以 CHANGELOG 与安装器回执为准。
 
 ```json
 {
@@ -23,7 +23,7 @@
 }
 ```
 
-实际参数来自公开 `pi.getSettings()`；环境变量 `PI_SHELL_GUARD_ES` 可覆盖 Everything CLI 路径。`guiPath` 必须是用户明确配置的 Everything GUI 绝对路径；`autostart: true` 时，只有在 CLI 明确报告 Everything IPC/服务不可用后，插件才会用 `shell:false`、detached spawn 启动该 GUI，并对同一组 CLI 参数重试一次。它不会启动任意程序，也不会把启动失败当成空结果。Everything 和 ES 由用户自行提供，本包不下载或捆绑它们。Linux 上没有 Everything 时，shell 检查继续工作，文件名工具明确报告后端不可用。
+实际参数来自公开 `pi.getSettings()`；环境变量 `PI_SHELL_GUARD_ES` 可覆盖 Everything CLI 路径。`guiPath` 必须是用户明确配置的 Everything GUI 绝对路径；`autostart: true` 时，只有在 CLI 明确报告 Everything IPC/服务不可用后，插件才会用 `shell:false` 启动该 GUI 一次，在有界启动调用结束后对同一组 CLI 参数重试一次。它不会启动任意程序，也不会把启动失败当成空结果。Everything 和 ES 由用户自行提供，本包不下载或捆绑它们。Linux 上没有 Everything 时，shell 检查继续工作，文件名工具明确报告后端不可用。
 
 ## 运行方式
 

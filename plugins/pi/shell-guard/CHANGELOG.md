@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 — 2026-11-08
+
+- Simplify Everything autostart: after an explicit IPC/service-unavailable error, invoke only the configured GUI once with a bounded `shell:false` call, then retry the exact CLI query once. The guard does not manage the GUI lifecycle.
+
 ## 0.2.1 — 2026-11-08
 
 - Allow finite informational forms such as `grep -V`, `head --version`, `less -V` and `watch -V` without a confirmation; continue blocking stdin-waiting forms such as `grep pattern`, `head -n 5` without a file and `tail -f`.
