@@ -1,6 +1,20 @@
 # Changelog
 
-## 0.1.0 — 2026-11-07
+## 0.2.0 — 2026-11-08
+
+Corrective review before frozen installer deployment. v0.1.0's reported replay classifications did not establish complete authorization enforcement.
+
+- Separate the host entry from a testable runtime; use raw direct input provenance for narrow affirmative deletion grants, clear it across lifecycle boundaries, and require explicit bounded confirmation for uncertainty.
+- Block the shell call when assessment or UI handling fails. Enforce the calculated timeout on explicit inputs too, rather than only calculating a clamp that never reached execution.
+- Review cwd changes, wrapper options, multiple/implicit search roots, quoting/heredoc boundaries, protected ancestors and per-job stdout/stderr redirection. Stop automatically granting arbitrary project or system-temp trees and dynamic scripted deletes.
+- Validate Everything query arguments and JSON strictly; cap process/output/result size, support abort, and state that index gaps or limited results are not proof of absence.
+- Add `/shell-guard status` and read-only `/shell-guard check <command>` for observing the loaded version/path and dry policy decisions.
+- Replace negative SDK smoke commands with inert execution recorders, using real SDK preflight and nested-tool events. Destructive/whole-disk candidates are never spawned by the verifier.
+- Publish and install only this child package; no Pi-core patch or hub-wide activation. The adapter is a heuristic guard, not an OS sandbox. Future Pi versions require compatibility verification.
+
+## 0.1.0 — 2026-11-07 (historical trial)
+
+The notes below describe incremental trial stages. Initial test/replay counts are historical, not guarantees, and some preliminary status sentences were superseded before release.
 
 First cut: pure policy library plus command corpus. Runtime wiring exists but is not yet validated against a real SDK.
 

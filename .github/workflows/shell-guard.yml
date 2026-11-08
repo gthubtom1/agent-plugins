@@ -8,6 +8,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -17,6 +18,8 @@ jobs:
         shell: bash
         run: |
           node --version
+          node --check plugins/pi/shell-guard/runtime.mjs
+          node --check plugins/pi/shell-guard/scripts/verify-sdk.mjs
           node --check plugins/pi/shell-guard/src/policy.mjs
           node --check plugins/pi/shell-guard/src/split.mjs
           node --check plugins/pi/shell-guard/src/rules/rm.mjs

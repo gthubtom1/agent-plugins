@@ -8,6 +8,7 @@ const BASE = {
   cwd: 'D:/Project/demo',
   projectRoot: 'D:/Project/demo',
   home: 'C:/Users/toti',
+  platform: 'win32',
   settings: { everything: { esPath: 'D:/Tools/es/es.exe' } },
 };
 
@@ -58,7 +59,8 @@ test('destructive deletes are tiered', () => {
   expect('rm notes.txt', { action: 'allow', tier: 'T0' });
   expect('rm -rf node_modules', { action: 'allow', tier: 'T1' });
   expect('rm -rf build', { action: 'allow', tier: 'T1' });
-  expect('rm -rf /tmp/scratch', { action: 'allow', tier: 'T1' });
+  expect('rm -rf /tmp/scratch', { action: 'confirm', tier: 'T2' });
+  expect('rm -rf src', { action: 'confirm', tier: 'T2' });
 
   expect('rm -rf /', { action: 'block', tier: 'T3' });
   expect('rm -rf C:\\', { action: 'block', tier: 'T3' });
@@ -84,15 +86,15 @@ test('indirect deletes require confirmation, scripted deletes follow their liter
   expect('find . -name "*.tmp" -delete', { action: 'confirm', tier: 'T2' });
   expect('ls | xargs rm', { action: 'confirm', tier: 'T2' });
 
-  // A scripted delete is judged by its literal path, like rm itself: in-project
-  // allow, outside confirm, drive root refused.
-  expect('python -c "import shutil; shutil.rmtree(\'x\')"', { action: 'allow' });
+  // Literal directory deletion follows the same tiers as rm.
+  expect('python -c "import shutil; shutil.rmtree(\'x\')"', { action: 'confirm' });
+  expect('python -c "import shutil; shutil.rmtree(\'build\')"', { action: 'allow' });
   expect('python -c "import shutil; shutil.rmtree(\'D:/other\')"', { action: 'confirm' });
   expect('python -c "import shutil; shutil.rmtree(\'/\')"', { action: 'block', tier: 'T3' });
-  expect('node -e "require(\'fs\').rmSync(\'x\',{recursive:true})"', { action: 'allow' });
+  expect('node -e "require(\'fs\').rmSync(\'x\',{recursive:true})"', { action: 'confirm' });
 
-  // A variable target or documentation text is not treated as a delete.
-  expect(script('shutil.rmtree(STAGE)'), { action: 'allow' });
+  // Dynamic deletion confirms; a string written as documentation is data.
+  expect(script('shutil.rmtree(STAGE)'), { action: 'confirm' });
   expect(script("open('README.md','w').write('shutil.rmtree(STAGE)')"), { action: 'allow' });
 });
 
@@ -144,7 +146,18 @@ PYEOF`, { action: 'allow' });
 test('timeouts follow the command class', () => {
   assert.equal(run('ls -la').timeout, 60);
   assert.equal(run('rg token .').timeout, 60);
-  assert.equal(run('python script.py').timeout, 900);
+  assert.equal(run('python script.py').timeout, 120);
+  assert.equal(run('python -c "print(1)"').timeout, 120);
+  assert.equal(run('node -e "1+1"').timeout, 120);
+  for (const sub of ['status', 'diff', 'log', 'rev-parse HEAD']) assert.equal(run(`git ${sub}`).timeout, 60);
+  for (const sub of ['clone', 'fetch', 'pull']) assert.equal(run(`git ${sub}`).timeout, 900);
+  assert.equal(run('git -C work status').timeout, 60);
+  assert.equal(run('npm ci').timeout, 900);
+  assert.equal(run('npm run build').timeout, 900);
+  assert.equal(run('npm --version').timeout, 120);
+  assert.equal(run('pip install package').timeout, 900);
+  assert.equal(run('python -m pip install package').timeout, 900);
+  assert.equal(run('node tool.js', { explicitTimeout: 600 }).timeout, 600);
   assert.equal(run('jadx -d out app.apk').timeout, 900);
   assert.equal(run('git clone https://example.com/x.git').timeout, 900);
   assert.equal(run('some-unknown-tool --flag').timeout, 120);
@@ -154,7 +167,8 @@ test('timeouts follow the command class', () => {
 });
 
 test('allowlist and disable switches work', () => {
-  expect('find / -maxdepth 1', { action: 'allow' }, { settings: { allow: ['^find /'] } });
+  expect('find / -maxdepth 1', { action: 'block' }, { settings: { allow: ['^find /'] } });
+  expect('ls -la', { action: 'allow', rule: 'allowlist' }, { settings: { allow: ['^ls'] } });
   expect('rm -rf /', { action: 'allow' }, { settings: { enabled: false } });
   expect('rm -rf /', { action: 'allow' }, { settings: { rm: { policy: 'off' } } });
   expect('python', { action: 'allow' }, { settings: { interactive: false } });
@@ -170,13 +184,13 @@ test('segment splitting and background detection', () => {
   const bg = splitSegments('python server.py &');
   assert.equal(isBackground(bg, 'python server.py &'), true);
   assert.equal(hasBackgroundRedirect('python server.py > log 2>&1 </dev/null &'), true);
-  assert.equal(hasBackgroundRedirect('python server.py > log &'), true);
+  assert.equal(hasBackgroundRedirect('python server.py > log &'), false);
   assert.equal(isBackground(splitSegments('a && b'), 'a && b'), false);
   assert.equal(isBackground(splitSegments('cmd 2>&1 | tail -5'), 'cmd 2>&1 | tail -5'), false);
 });
 
 test('segments are evaluated independently', () => {
-  expect('cd work && rm -rf node_modules', { action: 'allow' });
+  expect('cd work && rm -rf node_modules', { action: 'confirm' });
   expect('cd work && rm -rf ../../outside', { action: 'confirm' });
   expect('cd / && find / -maxdepth 2 -name x', { action: 'block' });
 });
@@ -213,7 +227,7 @@ test('user-named deletes are allowed, but scope cannot be widened', () => {
 test('junction targets are judged by their real path', () => {
   const realpath = (p) => (p.endsWith('/link') ? 'C:/Windows/System32' : p);
   expect('rm -rf link', { action: 'block', tier: 'T3' }, { realpath });
-  expect('rm -rf notes.txt', { action: 'allow' }, { realpath });
+  expect('rm notes.txt', { action: 'allow' }, { realpath });
 });
 
 test('wrapper commands are unwrapped before judging', () => {
@@ -224,7 +238,7 @@ test('wrapper commands are unwrapped before judging', () => {
   expect('nohup python', { action: 'block', rule: 'bare-repl' });
 
   expect('timeout 60 python script.py', { action: 'allow' });
-  assert.equal(run('timeout 60 python script.py').timeout, 900);
+  assert.equal(run('timeout 60 python script.py').timeout, 120);
   expect('nice -n 10 rg token .', { action: 'allow' });
   expect('env PATH=/usr/bin node -e "1"', { action: 'allow' });
 });

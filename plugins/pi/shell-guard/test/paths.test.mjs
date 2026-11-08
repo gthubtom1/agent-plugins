@@ -19,9 +19,9 @@ test('targets resolve relative to cwd without escaping', () => {
   assert.equal(resolveTarget('notes.txt', CWD).path, 'D:/Project/demo/notes.txt');
   assert.equal(resolveTarget('../other', CWD).path, 'D:/Project/other');
   assert.equal(resolveTarget('../../..', CWD).path, 'D:/');
-  assert.equal(resolveTarget('/d/Project/demo/../../x', CWD).path, 'D:/x');
-  assert.equal(resolveTarget('~/a', CWD, HOME).path, 'C:/Users/toti/a');
-  assert.equal(resolveTarget('$HOME', CWD, HOME).path, HOME);
+  assert.equal(resolveTarget('/d/Project/demo/../../x', CWD, HOME, 'win32').path, 'D:/x');
+  assert.equal(resolveTarget('~/a', CWD, HOME, 'win32').path, 'C:/Users/toti/a');
+  assert.equal(resolveTarget('$HOME', CWD, HOME, 'win32').path, HOME);
 });
 
 test('dynamic targets are reported instead of guessed', () => {
@@ -61,7 +61,8 @@ test('everything CLI arguments and JSON parsing', () => {
 
   const json = '[{"filename":"C:\\\\a\\\\b.txt"},{"filename":"D:\\\\c\\\\d.js"}]';
   assert.deepEqual(parseOutput(json), ['C:\\a\\b.txt', 'D:\\c\\d.js']);
-  assert.deepEqual(parseOutput('C:\\one\r\nD:\\two\r\n'), ['C:\\one', 'D:\\two']);
-  assert.deepEqual(parseOutput(''), []);
-  assert.deepEqual(parseOutput('not json at all'), ['not json at all']);
+  assert.throws(() => parseOutput('C:\\one\r\nD:\\two\r\n'));
+  assert.throws(() => parseOutput(''));
+  assert.throws(() => parseOutput('not json at all'));
+  assert.deepEqual(parseOutput('[]'), []);
 });

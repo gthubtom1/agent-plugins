@@ -31,7 +31,7 @@ export function checkInteractive(program, args, options, context = {}) {
     const inline = has('-c', '-e', '-r', '--eval', '-Command', '-EncodedCommand', '/c');
     // `python - <<'EOF' ... EOF` feeds a script through stdin; it is not a REPL.
     const stdinScript = args.includes('-') && /<<-?\s*['"]?[A-Za-z_]/.test(options.commandText ?? '');
-    const scriptFile = stdinScript || args.some((t) => !t.startsWith('-') && !t.startsWith('/'));
+    const scriptFile = stdinScript || piped || args.some((t) => !t.startsWith('-') && !/^\/[ck]$/i.test(t));
     if (!inline && !scriptFile) {
       return block('bare-repl', `${program} 无参数会进入交互式 REPL 并一直等待输入。改用：${program} script.py，或 ${program} -c "<一行代码>"。`);
     }
@@ -40,11 +40,12 @@ export function checkInteractive(program, args, options, context = {}) {
   // --- stdin filters -------------------------------------------------------
   if (STDIN_FILTER.has(program) && !piped) {
     const fileArgs = args.filter((t) => !t.startsWith('-'));
-    const numericOnly = args.length > 0 && args.every((t) => /^-\d+$/.test(t));
-    if (fileArgs.length === 0 && !numericOnly) {
+    if (fileArgs.length === 0) {
       return block('stdin-wait', `${program} 没有文件参数，会等待标准输入直到被执行器关闭。请显式给出文件或路径。`);
     }
   }
+
+  if (context.background && ['python', 'python3', 'py', 'npm', 'pnpm', 'yarn', 'bun', 'vite', 'next', 'nuxt', 'tail', 'ping', 'journalctl', 'docker', 'kubectl', 'nc', 'ncat', 'netcat', 'socat', 'scrcpy'].includes(program)) return null;
 
   // --- pagers and editors --------------------------------------------------
   if (PAGER_EDITOR.has(program)) {

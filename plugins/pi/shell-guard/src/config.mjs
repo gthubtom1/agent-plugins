@@ -1,53 +1,35 @@
-// Configuration defaults and normalisation. Kept separate from the rules so the
-// rules stay pure and testable.
-
-import { HOME, defaultProtectedPaths, stripTrailingSep } from './paths.mjs';
+import { HOME, defaultProtectedPaths, resolveTarget } from './paths.mjs';
 
 export const DEFAULTS = {
-  enabled: true,
-  blockWholeDisk: true,
-  interactive: true,
-  requireBackgroundRedirect: true,
+  enabled: true, blockWholeDisk: true, interactive: true, requireBackgroundRedirect: true,
   timeout: { fast: 60, default: 120, heavy: 900, ceiling: 1800 },
   rm: { policy: 'tiered', grantFromUserText: true },
-  everything: { enabled: true, esPath: '', maxResults: 50 },
-  allow: [],
+  everything: { enabled: true, esPath: '', maxResults: 50 }, allow: [],
 };
+const object = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+const seconds = (value, fallback) => typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.min(value, 1800) : fallback;
 
-function merge(base, patch) {
-  if (!patch || typeof patch !== 'object') return { ...base };
-  const out = { ...base };
-  for (const [key, value] of Object.entries(patch)) {
-    if (value && typeof value === 'object' && !Array.isArray(value) && base[key] && typeof base[key] === 'object') {
-      out[key] = { ...base[key], ...value };
-    } else if (value !== undefined) {
-      out[key] = value;
-    }
-  }
-  return out;
-}
-
-/**
- * @param {object} input
- * @param {object} [input.settings]  shellGuard settings block from settings.json
- * @param {string} [input.cwd]       shell working directory
- * @param {string} [input.projectRoot]
- * @param {string} [input.home]
- * @param {number} [input.explicitTimeout] timeout the model already passed
- */
 export function normalizeOptions(input = {}) {
-  const merged = merge(DEFAULTS, input.settings || {});
+  const settings = object(input.settings);
+  const platform = input.platform ?? process.platform;
   const home = input.home || HOME;
-  const configured = Array.isArray(input.settings?.protectedPaths) ? input.settings.protectedPaths : null;
+  const cwd = input.cwd || process.cwd();
+  const merged = { ...DEFAULTS, ...settings };
+  const timeout = { ...DEFAULTS.timeout, ...object(settings.timeout) };
+  for (const key of Object.keys(DEFAULTS.timeout)) timeout[key] = seconds(timeout[key], DEFAULTS.timeout[key]);
+  const protectedPaths = [...defaultProtectedPaths(home, platform), ...(Array.isArray(settings.protectedPaths) ? settings.protectedPaths : [])];
   return {
-    ...merged,
-    cwd: input.cwd || process.cwd(),
-    projectRoot: input.projectRoot || input.cwd || process.cwd(),
-    home,
+    ...merged, platform, cwd, home, projectRoot: input.projectRoot || cwd,
+    timeout, rm: { ...DEFAULTS.rm, ...object(settings.rm) },
+    everything: { ...DEFAULTS.everything, ...object(settings.everything) },
     explicitTimeout: input.explicitTimeout,
-    // Optional injected resolver (tests) or fs.realpath (runtime).
     realpath: typeof input.realpath === 'function' ? input.realpath : undefined,
-    protectedPaths: (configured || defaultProtectedPaths(home)).map((p) => stripTrailingSep(p)),
+    protectedPaths: protectedPaths.map((value) => {
+      if (typeof value !== 'string') throw new TypeError('Invalid protected path');
+      const result = resolveTarget(value, cwd, home, platform);
+      if (!result?.path) throw new TypeError('Protected path must be literal');
+      return result.path;
+    }),
     allow: Array.isArray(merged.allow) ? merged.allow : [],
   };
 }

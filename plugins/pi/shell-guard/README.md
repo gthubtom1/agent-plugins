@@ -1,126 +1,70 @@
 # pi-shell-guard
 
-Pi 的 shell 安全护栏：限时、限范围、按档保护删除。纯策略库可离线测试，运行时只做事件接线。
+独立的 Pi 扩展：给模型发起的 `bash` 调用补充有限超时，在执行前检查常见搜索、删除和后台命令，并提供 Everything 文件名检索。无需修改 Pi 核心；升级宿主后仍从个人配置加载。宿主 API 变化仍需重新验证兼容性。
 
-## 为什么需要它
+## 安装与版本
 
-一次真实事故：模型猜错路径后写了
+安装器以精确公共 release commit 和插件目录树摘要安装本包，**只注册 `plugins/pi/shell-guard`，不要安装整个 hub**。安装器的 shell-guard 选项默认关闭，明确启用后后续更新保留选择。源码试用安装不能替代冻结身份。
 
-```bash
-find / -maxdepth 6 -name "*skinforge*" -newermt "2026-11-06" -type f | head -30
-```
-
-在 Windows 上 Git Bash 的 `/` 是整台机器（`/c`、`/d`、`/e`），于是它扫了所有盘，跑了十几分钟，看起来像卡死。`find` 不读 `.gitignore`，`| head` 也不会让它提前停止。
-
-Pi 上游的 `bash` 工具 `timeout` 参数是可选的，不传就没有上限（上游 issue #2987 / #8857 / #9798 记录了同类问题）。社区做法是在扩展里注入默认超时；本项目在此之上增加了范围与删除保护。
-
-## 工作方式
-
-三层，互补而非互斥：
-
-| 层 | 机制 | 作用 |
-|---|---|---|
-| 硬拦截 | `tool_call` 事件 | 命令执行前判定，可拒绝，或注入 `timeout` |
-| 软引导 | `before_agent_start` | 每轮注入一小段策略，让模型第一次就写对 |
-| 替代工具 | `registerTool`（P2） | `search_files` 走 Everything，毫秒级全盘按文件名查找 |
-
-嵌套调用同样经过 `tool_call`，所以从 codemode 里调 bash 也拦得住。
-
-## 规则
-
-**超时分档**（显式传入则保留，但夹到上限 1800s）
-
-| 档 | 例子 | 默认 |
-|---|---|---|
-| fast | `ls` `rg` `git status` `sha256sum` | 60s |
-| default | 未识别命令 | 120s |
-| heavy | `jadx` `ghidra` `rizin -A` `git clone` `npm i` `binwalk -e` | 900s |
-
-**整盘搜索**：`find` / `grep -r` / `rg` / `du` / `tree` / `dir /s` / `Get-ChildItem -Recurse` / `where /R`，只要搜索根是盘符根、`$HOME` 或共享根就拒绝，并在理由里给出替代写法。
-
-**删除分档**（`rm` `del` `Remove-Item` `git clean` `find -delete` `xargs rm` 及内联 `shutil.rmtree` / `fs.rmSync`）
-
-| 档 | 场景 | 行为 |
-|---|---|---|
-| T0 | 项目内单文件 | 放行 |
-| T1 | 项目内生成目录（`node_modules` `dist` `build`）、临时目录 | 放行并说明 |
-| T2 | 通配、项目外递归、项目根、`.git`、未跟踪文件清理 | 需用户确认 |
-| T3 | 盘符根、主目录、系统目录、无目标删除 | 拒绝 |
-
-注意：Git Bash 的 `rm` 不进 Windows 回收站，所以这是真删除。
-
-### 你让它删，它就能删
-
-T2 不是一律拦截。只有当**你自己的那条消息**里同时满足下面两点时，才直接放行：
-
-1. 含有删除意图词（删除 / 删掉 / 清理 / 移除 / remove / delete …）
-2. 写明了路径，且该路径包含要删的目标
-
-例如你说「删除 D:/Project/other」，那么 `rm -rf ../other` 直接执行，不再弹确认；而同一轮里如果命令还夹带了别的目录，那个目录依然需要确认。
-
-不可绕过的部分：
-
-- 授权只来自**用户消息文本**。模型无法往用户消息里加字，所以无法自己造授权。
-- T3（盘符根、主目录、系统目录）永不授权，即使你写了「删除 D:/」。
-- 通配符（`*`）、`find -delete`、`xargs rm`、内联 `shutil.rmtree` 等范围不确定的形式，始终需要确认。
-- 路径先做 `realpath`，符号链接/junction 指向系统目录时按真实路径判定。
-- 授权只对当前这一轮有效，下一轮消息不继承。
-
-**永不返回**：裸 REPL、无参 `cat`/`sort`、`tail -f`、编辑器/分页器、`adb logcat`/`wait-for-device`、前台 `frida`、`http.server`、`npm run dev`、`ssh`/`sudo` 等。
-
-**后台未重定向**：`cmd &` 且没有 `>log 2>&1 </dev/null` 时拒绝，因为执行器会一直等管道关闭。
-
-## Everything 集成
-
-`search_files` 只做**文件名/路径**查找，内容搜索仍用 `rg`（Everything 不索引文件内容）。
-
-```json
-{ "shellGuard": { "everything": { "enabled": true, "esPath": "D:/Tools/es/es.exe", "maxResults": 50 } } }
-```
-
-`es.exe` 必须配置绝对路径且 Everything 正在运行；缺失时工具降级并明确报错，不会把"没找到"当成事实。
-
-配置从 `pi.getSettings()` 读取，写入 `settings.json` 顶层：
-
-```json
-{ "shellGuard": { "everything": { "esPath": "D:/Tools/es/es.exe", "maxResults": 50 } } }
-```
-
-注意 Everything 会把 `.` 当作分隔符：查 `es.exe` 会命中 `services.exe`、`Clockres.exe` 之类的子串。要精确匹配请用 `regex: true` 或带路径的查询。
-
-## 配置
+本包维护的版本为 **0.2.0**。0.1.0 是最初试用版本；0.2.0 修正了复核发现的授权、异常处理、路径及输出问题。具体发布和宿主验证以 CHANGELOG 与安装器回执为准。
 
 ```json
 {
+  "packages": ["<absolute-frozen-package-directory>"],
   "shellGuard": {
-    "enabled": true,
-    "blockWholeDisk": true,
-    "interactive": true,
-    "requireBackgroundRedirect": true,
-    "timeout": { "fast": 60, "default": 120, "heavy": 900, "ceiling": 1800 },
-    "rm": { "policy": "tiered" },
-    "protectedPaths": [],
-    "allow": []
+    "timeout": {"fast": 60, "default": 120, "heavy": 900, "ceiling": 1800},
+    "everything": {"esPath": "<absolute-path-to-es.exe>", "maxResults": 50}
   }
 }
 ```
 
-## 边界
+实际参数来自公开 `pi.getSettings()`；环境变量 `PI_SHELL_GUARD_ES` 可覆盖 Everything CLI 路径。Everything 和 ES 由用户自行提供，本包不下载、捆绑或自动启动它们。Linux 上没有 Everything 时，shell 检查继续工作，文件名工具明确报告后端不可用。
 
-- **fail-open**：插件内部异常一律放行，绝不因为护栏 bug 卡住 shell。
-- 只读命令字符串做判定，不改写命令内容，只改 `timeout` 一个字段。
-- shell 是图灵完备的，字符串解析不可能完备；本插件覆盖常见直接写法，不宣称"绝对删不掉"。
-- T2 的 UI 确认在 P2 接入 `ui.select`；当前版本把 T2 转成"需要用户确认"的拒绝理由。
-- 未做：`write`/`edit` 的路径级保护（P3）。
+## 运行方式
 
-## 状态
+- `tool_call`：在 `bash` 执行前判断，拒绝操作或设置原工具的 `timeout` 参数，不改写命令文本。通过 Pi `ctx.executeTool()` 发起的嵌套 bash 调用也经过该事件。
+- `input` 和 `before_agent_start`：识别当前直接用户输入，注入一段简短策略。模板展开、工具结果、custom消息和 extension发送的用户文本不能自动生成删除授权。
+- `/shell-guard status`：显示当前已加载版本、模块路径和策略边界。它不启动模型或检查磁盘全盘。
+- `search_files`：用绝对 ES 路径、独立 argv 和15秒截止时间查询 Everything。最多200条、输出24KB；失败和空结果明确区分。
 
-P1 完成：策略库 + 20 项离线语料测试。P2 完成：真实 Pi SDK 验证 15 项全过（拦截、放行、超时注入、授权放行、授权不放宽、`search_files` 实查）。P3 才装进 agent 目录试用。**当前尚未发布、尚未安装。**
+不再把搜索规则分别写回 reverse领域规则或四个宿主适配器。本插件的行为和提示随同一包版本发布。
 
-```bash
-# 离线策略测试
+## 删除既可用，也有边界
+
+明确的当前请求例如“删除 `D:/work/old-cache`”应只覆盖该路径。新增目标、否定句、引述、含糊意图、通配或动态计算的范围不能凭关键词自动放行；必要时进入一次性确认。确认只允许当前完整命令，取消、超时、无UI或判断异常均不执行。
+
+盘符根、用户主目录、系统和凭据目录受保护；保护判断不能被普通 allow规则覆盖。相对路径、`cd` 后的路径和已存在父目录的联接目标均需核对。普通生成目录清理保持可用；任意项目目录或整个临时目录不能仅因位于项目/临时目录下就自动批准。
+
+直接用户请求的识别是保守的语法判断，不是通用自然语言理解。复杂的“删A但保留B”、引用示例或变量路径可能需要确认/拆分。这种情况应说明具体目标，不应要求关闭插件或改写命令绕过。
+
+`rm` 通常不进系统回收站，本插件不提供备份或撤销。确认界面显示的是待执行操作，不代表插件已经证明所有副作用安全。
+
+## 搜索与长任务
+
+默认超时分为60/120/900秒，显式正数受到1800秒配置上限约束，超时结果写入实际调用参数。分类是启发式的，耗时长的合法任务应明确预算与生命周期。
+
+常见整盘 `find` / 递归 `grep` / `rg` / `dir` / `Get-ChildItem` 等形式会被拒绝，包装命令也需检查。`find` 不使用 ripgrep的忽略规则；`| head` 只限制可见输出，不是遍历预算或进程清理保证。Git Bash的根目录与挂载盘符由具体安装决定，不能把每一种 `/` 形式解释为已扫描全部盘符。
+
+常驻服务、交互等待与后台进程需要单独管理。后台只关闭stdin或只重定向一个输出流仍可能保留执行器管道；多个后台任务分别检查，不能借同一串命令中另一个任务的重定向通过。
+
+## Everything 的结果含义
+
+普通查询使用 Everything 的搜索语法，通常是子串匹配。精确文件名可用 `regex: true`，例如 `^es\\.exe$`；目录限制用 `path`。内容搜索继续使用限定目录的 `rg`。
+
+索引可能未覆盖某个卷、排除目录或尚未更新；有限条数返回也可能没有包含目标。因此空结果、返回上限、后端错误**都不能证明文件不存在**。CLI不可用或返回无效JSON会报错，不能把错误文本当成文件列表。
+
+## 保护范围
+
+这是常见命令的**预执行护栏**，不是操作系统沙箱。任意程序/脚本、其他扩展的直接进程调用、直接用户 `!` shell、MCP内部命令或其他文件写入工具不等于已经被完整控制。串接、解释器、编码脚本和运行时计算无法仅凭字符串完全验证。判断异常会阻止该次bash调用；取消/确认的错误不会退化为放行。
+
+已安装旧模块可能仍被宿主进程缓存。使用新的冻结目录后检查 `/shell-guard status` 的实际模块路径，不能仅凭配置改动声称已加载。必要时重载/重启并重新验证；不要为测试停止用户正在使用的服务。
+
+## 验证
+
+```text
 node --test test/*.test.mjs
-
-# 真实 SDK 验证（不联网，进程内假 provider）
-PI_SDK_DIR=<.../@earendil-works/pi-coding-agent> PI_SHELL_GUARD_ES=<.../es.exe> node scripts/verify-sdk.mjs
 ```
+
+`PI_SDK_DIR` 指向调用方已有的 Pi SDK 后可执行 `node scripts/verify-sdk.mjs`。测试使用确定性假provider和惰性bash执行器；危险负例不运行真实命令。可选 `PI_SHELL_GUARD_ES` 启用真实只读索引查询；缺少时明确记录未验证，不能算作成功。
+
+历史681条回放仅是一批字符串判定结果，没有完整的人工期望标注；“全部放行”不等于零误判或没有绕过。0.2.0用有明确正负期望的测试与实际SDK事件验证取代该完成依据。发布前分别记录策略、宿主接线、索引可用性和安装/回滚结果。

@@ -16,8 +16,7 @@
       "./plugins/pi/pi-prompt-compat/prompt-compat.ts",
       "./plugins/pi/pi-seep-ext/extensions/persona.ts",
       "./plugins/pi/pi-seep-ext/extensions/rewind.ts",
-      "./plugins/pi/pi-seep-ext/extensions/remote.ts",
-      "./plugins/pi/project-continuity/index.ts"
+      "./plugins/pi/pi-seep-ext/extensions/remote.ts"
     ]
   },
   "repository": {
