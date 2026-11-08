@@ -14,6 +14,17 @@ const uncertain = (rule, reason) => ({ action: 'confirm', tier: 'T2', rule, reas
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'fish', 'pwsh', 'powershell', 'cmd']);
 const CONTROL = new Set(['if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'until', 'do', 'done', 'case', 'esac', 'function', 'eval', 'source', '.', 'alias', 'unalias', 'trap']);
 
+// A deliberately small grammar for literal file-existence loops. Every body
+// operation is fixed and read-only; arbitrary control flow is still uncertain.
+function isReadOnlyFileLoop(command) {
+  const match = /^\s*for\s+([a-z][a-z0-9_]*)\s+in\s+([^;\n]+);\s*do\s+if\s+test\s+-f\s+"\$\1";\s*then\s+printf\s+"%s\\n"\s+"\$\1";\s*fi;\s*done\s*$/.exec(command);
+  if (!match) return false;
+  const list = parseShell(match[2]);
+  return !list.uncertain && list.segments.length === 1 && !list.segments[0].connector
+    && !list.segments[0].redirects.length && list.segments[0].tokens.length > 0
+    && list.segments[0].tokens.every((token) => !token.dynamic && /^[a-zA-Z0-9_./:-]+$/.test(token.value) && !token.value.startsWith('-'));
+}
+
 export function evaluate(command, input = {}) {
   try { return evaluateCommand(command, input, 0); }
   catch {
@@ -25,12 +36,15 @@ function evaluateCommand(command, input, depth, inheritedGrants) {
   const base = normalizeOptions(input);
   const timeoutDefault = () => clampExplicit(base.explicitTimeout, base) ?? Math.min(base.timeout.default, base.timeout.ceiling);
   if (base.enabled === false) return { action: 'allow', rule: 'disabled', timeout: timeoutDefault() };
+  if (isReadOnlyFileLoop(command)) return { action: 'allow', rule: 'readonly-file-loop', klass: 'fast', timeout: clampExplicit(base.explicitTimeout, base) ?? Math.min(base.timeout.fast, base.timeout.ceiling) };
   const grants = inheritedGrants !== undefined ? inheritedGrants : base.rm?.grantFromUserText === false ? null : readGrants(input.userText ?? '', base);
   const parsed = parseShell(command);
   let decision = { action: 'allow', rule: 'default' }, heaviest = 'fast';
   const notes = new Set();
+  let deletion = false;
   const merge = (candidate) => {
     if (!candidate) return;
+    if (candidate.deletion || candidate.rule?.startsWith('rm-') || ['git-clean', 'find-delete', 'xargs-rm', 'script-delete-unknown'].includes(candidate.rule)) deletion = true;
     decision = worst(decision, candidate);
     if (candidate.action !== 'allow' && candidate.reason) notes.add(candidate.reason);
   };
@@ -141,7 +155,7 @@ function evaluateCommand(command, input, depth, inheritedGrants) {
       try { if (typeof pattern === 'string' && new RegExp(pattern).test(command)) decision.rule = 'allowlist'; } catch { /* ignore invalid patterns */ }
     }
   }
-  return { action: decision.action, timeout, reason: notes.size ? [...notes].join(' ') : decision.reason, rule: decision.rule, tier: decision.tier, klass: heaviest };
+  return { action: decision.action, timeout, reason: notes.size ? [...notes].join(' ') : decision.reason, rule: decision.rule, tier: decision.tier, klass: heaviest, ...(deletion ? { deletion: true } : {}) };
 }
 
 export { normalizeOptions };

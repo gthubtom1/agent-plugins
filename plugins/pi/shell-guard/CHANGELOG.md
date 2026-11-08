@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.3 — 2026-11-08
+
+- Both main-agent and child-agent ordinary project-local `rm` calls use the same rule: rewrite Bash to the existing trash module's Node helper, then rename one literal target into `TEMP/<unique-batch>/<original-name>` during execution and report its recovery path. Preflight and dry checks never move files; later handlers may still block.
+- Recognized unsupported delete operations return an immediate tool error/block. All Bash confirmation cases also return immediately without opening UI. `parentToolCallId` is not used to infer session roles.
+- Recheck existing hard protections, source and TEMP parent paths immediately before rename. Reject target/parent links, TEMP case aliases, protected paths, known database path/file names, destination collisions and rename failures; never fall through to `rm` or copy/delete on cross-device errors. Directory contents are preserved as a whole, without recursive inspection.
+- Allow the fixed read-only literal `for` / `test -f` / `printf` file-existence loop with a finite timeout. Preserve deletion markers across nested commands and allowlist annotations.
+
 ## 0.2.2 — 2026-11-08
 
 - Simplify Everything autostart: after an explicit IPC/service-unavailable error, invoke only the configured GUI once with a bounded `shell:false` call, then retry the exact CLI query once. The guard does not manage the GUI lifecycle.

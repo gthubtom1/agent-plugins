@@ -3,15 +3,20 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { evaluate } from './src/policy.mjs';
+import { parseTrashableRm, trashCommand } from './src/trash.mjs';
 import { buildArgs, isBoundedTimeout, isIpcUnavailable, parseOutput, validateEverythingConfig } from './src/everything.mjs';
 
-export const VERSION = '0.2.2';
+export const VERSION = '0.2.3';
+const DELETION_RULES = new Set(['git-clean', 'find-delete', 'xargs-rm', 'script-delete-unknown']);
+const isDeletionDecision = (decision) => decision.deletion || decision.rule?.startsWith('rm-') || DELETION_RULES.has(decision.rule);
 const run = promisify(execFile);
+
 const GUI_START_TIMEOUT = 5000;
 const GUIDANCE = `Shell guard checks common bash command forms before execution and applies finite timeouts. It is a heuristic guard, not an operating-system sandbox.
 - Use search_files for indexed filename/path lookup and scoped rg for file contents. Index absence, limited results and backend failure do not establish that a file does not exist.
-- Name exact deletion targets. Only unambiguous current user input may grant a target; negated, quoted or uncertain intent requires confirmation. Never widen scope or rewrite a rejected command to evade a decision.
-- Root/system targets remain protected. Unknown destructive forms require review; normal generated-file cleanup should stay usable.
+- Ordinary project-local rm of one literal target is moved during Bash execution to TEMP/<unique-batch>/<original-name>; the original rm never executes.
+- Roots, system/home/credential paths, .git, TEMP, known database path/file names, target/parent links and outside-project targets are protected. Unsupported deletion forms return an immediate tool error.
+- Every Bash command requiring confirmation returns an immediate tool error/block; no confirmation UI is opened. Direct and nested calls use the same policy.
 - Long-lived jobs need bounded lifecycle and separate stdout/stderr; do not assume a pipe to head or a timeout command constrains traversal scope.
 - A guard error blocks that shell call rather than silently allowing it. Other tools, arbitrary scripts, direct user shell commands and other extensions are not an OS security boundary.`;
 const object = (properties, required = []) => ({type:'object',properties,required,additionalProperties:false});
@@ -73,17 +78,17 @@ export function registerShellGuard(pi, dependencies = {}) {
       const decision = policy(command,{...initialOptions,explicitTimeout:event.input.timeout});
       if (!decision || !['allow','confirm','block'].includes(decision.action)) throw new Error('Invalid policy decision');
       if (decision.action === 'block') return {block:true,reason:decision.reason ?? 'shell-guard: blocked'};
-      if (decision.action === 'confirm') {
-        if (ctx.hasUI !== true || typeof ctx.ui?.select !== 'function') return {block:true,reason:`需要确认：${decision.reason ?? '无法确定删除范围'}。当前宿主没有确认界面；请明确具体目标。`};
-        if (command.length > 6000) return {block:true,reason:'待确认命令过长，请拆成可完整审阅的具体操作。'};
-        const choice = await ctx.ui.select(`确认这一次操作？\n${decision.reason ?? ''}\n\n工作目录：${ctx.cwd}\n${command}`,['取消','仅允许本次'],{signal:ctx.signal,timeout:120000});
-        if (choice !== '仅允许本次' || ctx.signal?.aborted) return {block:true,reason:'操作未获确认（取消、超时或中止）。'};
-        // Re-evaluate filesystem identity immediately before execution. Never cache approval.
-        const fresh = policy(command,{...options(ctx),explicitTimeout:event.input.timeout});
-        if (JSON.stringify(fresh) !== JSON.stringify(decision)) return {block:true,reason:'等待确认期间目标或策略发生变化，请重新审阅操作。'};
-      }
-      if (event.input.command !== command) return {block:true,reason:'待执行命令在确认期间发生变化。'};
       if (!Number.isFinite(decision.timeout) || decision.timeout <= 0 || decision.timeout > 2147483) throw new Error('Policy returned an invalid timeout');
+
+      if (isDeletionDecision(decision)) {
+        const trashPlan = parseTrashableRm(command, initialOptions);
+        if (!trashPlan) return {block:true,reason:'shell-guard：此删除形式或目标不能安全移入项目 TEMP，已阻止；原始删除命令未执行。请使用单个项目内字面目标；TEMP、.git、数据库和受保护路径不能自动清理。'};
+        // Mutate only arguments here. Actual I/O belongs to Bash execution,
+        // after every later tool_call handler has had a chance to block.
+        event.input.command = trashCommand(trashPlan);
+      } else if (decision.action === 'confirm') {
+        return {block:true,reason:`shell-guard：${decision.reason ?? '命令需要确认'}。已即时阻止本次调用，未执行、未打开确认界面。请简化为可判定的具体命令。`};
+      }
       // Enforce the result even when a caller supplied an explicit excessive timeout.
       event.input.timeout = decision.timeout;
     } catch (error) {

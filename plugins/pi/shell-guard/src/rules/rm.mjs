@@ -50,7 +50,7 @@ function deletionArgs(program, args) {
   return { targets, recursive, uncertain };
 }
 
-function hardTarget(candidate, options) {
+export function hardTarget(candidate, options) {
   const platform = options.platform;
   if (isDriveRoot(candidate)) return block('rm-drive-root', candidate);
   if (isUncRoot(candidate)) return block('rm-unc-root', candidate);
