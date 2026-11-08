@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseTrashableRm, moveToTemp } from '../src/trash.mjs';
 
 async function fixture() {
-  const root = await mkdtemp(path.join(tmpdir(), 'shell-guard-trash-'));
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'shell-guard-trash-')));
   return { root, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
 

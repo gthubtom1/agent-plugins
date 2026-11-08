@@ -3,7 +3,7 @@ import test from 'node:test';
 import { registerShellGuard } from '../runtime.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -65,7 +65,7 @@ test('all confirmation cases return immediate non-terminating errors without UI'
 });
 
 test('direct, nested and independent sessions defer intact TEMP moves until Bash executes',async()=>{
-  const root=await mkdtemp(path.join(tmpdir(),'shell-guard-trash-runtime-'));
+  const root=await realpath(await mkdtemp(path.join(tmpdir(),'shell-guard-trash-runtime-')));
   try {
     for(const [actor,parent] of [['main',undefined],['nested','parent-tool-call'],['independent',undefined]]) {
       const name=`${actor} 'cache`;
@@ -87,7 +87,7 @@ test('direct, nested and independent sessions defer intact TEMP moves until Bash
 });
 
 test('dry check and later handler block have no filesystem side effects',async()=>{
-  const root=await mkdtemp(path.join(tmpdir(),'shell-guard-preflight-'));
+  const root=await realpath(await mkdtemp(path.join(tmpdir(),'shell-guard-preflight-')));
   try {
     await writeFile(path.join(root,'keep.txt'),'untouched');
     const f=fixture({cwd:root});
@@ -102,7 +102,7 @@ test('dry check and later handler block have no filesystem side effects',async()
 });
 
 test('invalid TEMP fails during helper execution and unsupported deletions never fall through',async()=>{
-  const root=await mkdtemp(path.join(tmpdir(),'shell-guard-bad-temp-'));
+  const root=await realpath(await mkdtemp(path.join(tmpdir(),'shell-guard-bad-temp-')));
   try {
     await writeFile(path.join(root,'keep.txt'),'not lost');
     await writeFile(path.join(root,'TEMP'),'not a directory');
