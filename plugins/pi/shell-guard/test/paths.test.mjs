@@ -61,7 +61,8 @@ test('everything CLI arguments and JSON parsing', () => {
 
   const json = '[{"filename":"C:\\\\a\\\\b.txt"},{"filename":"D:\\\\c\\\\d.js"}]';
   assert.deepEqual(parseOutput(json), ['C:\\a\\b.txt', 'D:\\c\\d.js']);
-  assert.deepEqual(parseOutput('C:\\one\r\nD:\\two\r\n'), ['C:\\one', 'D:\\two']);
-  assert.deepEqual(parseOutput(''), []);
-  assert.deepEqual(parseOutput('not json at all'), ['not json at all']);
+  assert.throws(() => parseOutput('C:\\one\r\nD:\\two\r\n'));
+  assert.throws(() => parseOutput(''));
+  assert.throws(() => parseOutput('not json at all'));
+  assert.deepEqual(parseOutput('[]'), []);
 });

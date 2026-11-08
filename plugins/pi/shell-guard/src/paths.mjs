@@ -1,141 +1,102 @@
-// Path normalisation shared by every rule. Pure functions, no I/O.
-//
-// Resolution is lexical rather than host-dependent: the same Windows-style input
-// must classify identically on Linux CI, where `node:path` would treat `D:/x` as
-// a relative name.
+// Lexical paths only. The caller supplies the shell platform; host OS is the default.
 import os from 'node:os';
-import path from 'node:path';
-
-const WINDOWS_ABS = /^[a-zA-Z]:[\\/]/;
-const UNC = /^\\\\/;
-const BACKSLASH = String.fromCharCode(92);
 
 export const HOME = os.homedir();
 export const TMP = os.tmpdir();
+const win = (platform) => platform === 'win32';
+const windowsPath = (value) => /^[a-z]:[\\/]/i.test(value) || /^\\\\/.test(value);
+export const toPosix = (value) => String(value).replace(/\\/g, '/');
 
-export function toPosix(p) {
-  return String(p).replace(/\\/g, '/');
+export function msysToWin(value, platform = process.platform) {
+  if (!win(platform)) return value;
+  const match = /^\/([a-z])(\/.*)?$/i.exec(value);
+  return match ? `${match[1].toUpperCase()}:${match[2] || '/'}` : value;
 }
 
-/** Git Bash exposes drives as /c, /d ... ; convert to C:/, D:/ */
-export function msysToWin(p) {
-  if (p === '/tmp' || p.startsWith('/tmp/')) return path.join(TMP, p.slice(4));
-  const m = /^\/([a-zA-Z])(\/.*)?$/.exec(p);
-  if (m) return `${m[1].toUpperCase()}:${m[2] || '/'}`;
-  return p;
+export function isAbsoluteAny(value) {
+  return /^[a-z]:[\\/]/i.test(value) || value.startsWith('/') || /^\\\\/.test(value);
 }
 
-export function isAbsoluteAny(p) {
-  return WINDOWS_ABS.test(p) || p.startsWith('/') || UNC.test(p) || /^[a-zA-Z]:$/.test(p);
+export function stripTrailingSep(value) {
+  const text = String(value);
+  if (text === '/' || text === '//' || /^[a-z]:\/$/i.test(text)) return text;
+  return text.replace(/\/+$/, '');
 }
 
-export function stripTrailingSep(p) {
-  const s = toPosix(p);
-  if (s === '/' || /^[a-zA-Z]:\/$/.test(s)) return s;
-  return s.replace(/\/+$/, '');
-}
-
-/** Collapse `.` and `..` lexically, keeping drive letters and leading slashes. */
-export function normalisePath(input) {
-  const s = toPosix(String(input ?? ''));
-  const drive = /^[a-zA-Z]:/.exec(s);
-  const prefix = drive ? drive[0].toUpperCase() : s.startsWith('/') ? '/' : '';
-  const rest = drive ? s.slice(2) : s.startsWith('/') ? s.slice(1) : s;
+export function normalisePath(input, platform = process.platform) {
+  const raw = String(input ?? '');
+  const text = win(platform) || windowsPath(raw) ? toPosix(raw) : raw;
+  const drive = /^[a-z]:/i.exec(text);
+  const unc = text.startsWith('//');
+  const prefix = drive ? drive[0].toUpperCase() + '/' : unc ? '//' : text.startsWith('/') ? '/' : '';
   const parts = [];
-  for (const part of rest.split('/')) {
+  for (let part of text.slice(drive ? 2 : unc ? 2 : prefix.length).split('/')) {
+    // Strip Win32 suffixes before resolving dot components, including '.. '.
+    if (win(platform)) {
+      part = part.replace(/ +$/, '');
+      if (part !== '.' && part !== '..') part = part.replace(/[ .]+$/, '');
+    }
     if (!part || part === '.') continue;
     if (part === '..') {
-      if (parts.length && parts[parts.length - 1] !== '..') parts.pop();
-      else if (!prefix) parts.push('..');
+      if (parts.length > (unc ? 2 : 0) && parts.at(-1) !== '..') parts.pop();
+      else if (!prefix) parts.push(part);
       continue;
     }
-    parts.push(part);
+    // Win32 ignores trailing dots/spaces in ordinary path components.
+    if (win(platform)) part = part.replace(/[ .]+$/, '');
+    if (part) parts.push(part);
   }
-  const joined = parts.join('/');
-  if (drive) return joined ? `${prefix}/${joined}` : `${prefix}/`;
-  if (prefix === '/') return `/${joined}`;
-  return joined || '.';
+  return prefix + parts.join('/') || '.';
 }
 
-/**
- * Resolve one target token (as typed) into a normalised absolute path.
- * Returns { path } or { dynamic: true, raw } when the token cannot be resolved
- * statically (variables, command substitution, unknown globs at root).
- */
-export function resolveTarget(token, cwd = process.cwd(), home = HOME) {
-  let t = String(token ?? '').trim().replace(/^['"]|['"]$/g, '');
-  if (!t) return null;
-  if (t === '~' || t === '$HOME' || t === '${HOME}' || t === '%USERPROFILE%') return { path: normalisePath(home) };
-  if (t.startsWith('~/') || t.startsWith(`~${BACKSLASH}`)) return { path: normalisePath(`${home}/${t.slice(2)}`) };
-  if (/\$\(|`|\$\{|\$[A-Za-z_]|%[A-Za-z_]+%/.test(t)) return { dynamic: true, raw: t };
-  if (t === '-' || t === '--') return { dynamic: true, raw: t };
-  t = msysToWin(t);
-  const absolute = isAbsoluteAny(t) ? t : `${cwd}/${t}`;
-  return { path: stripTrailingSep(normalisePath(absolute)) };
+export function resolveTarget(token, cwd = process.cwd(), home = HOME, platform = process.platform) {
+  let text = String(token ?? '');
+  if (!text) return null;
+  if (['~', '$HOME', '${HOME}', '%USERPROFILE%'].includes(text)) text = home;
+  else if (text.startsWith('~/') || (win(platform) && text.startsWith('~\\'))) text = `${home}/${text.slice(2)}`;
+  else if (/^(?:\$HOME|\$\{HOME\}|%USERPROFILE%)[/\\]/.test(text)) text = home + '/' + text.replace(/^(?:\$HOME|\$\{HOME\}|%USERPROFILE%)[/\\]/, '');
+  else if (/[$`]|%[^%]+%|^~|[{}\n\r\0]/.test(text)) return { dynamic: true, raw: text };
+  if (/^[a-z]:(?![\\/])/i.test(text) || /^[/\\]{2}[?.]/.test(text) || text === '-') return { dynamic: true, raw: text };
+  if (win(platform) && /:/.test(text.replace(/^[a-z]:/i, ''))) return { dynamic: true, raw: text };
+  if (win(platform) && /^\\(?!\\)/.test(text)) {
+    const drive = /^[a-z]:/i.exec(cwd);
+    if (!drive) return { dynamic: true, raw: text };
+    text = drive[0] + text;
+  }
+  text = msysToWin(text, platform);
+  return { path: stripTrailingSep(normalisePath(isAbsoluteAny(text) ? text : `${/[\\/]$/.test(cwd) ? cwd : cwd + '/'}${text}`, platform)) };
 }
 
-export function isDriveRoot(p) {
-  const s = stripTrailingSep(p).toLowerCase();
-  return s === '/' || s === '' || /^[a-z]:$/.test(s) || /^[a-z]:\/$/.test(s);
+export function isDriveRoot(value) {
+  return /^(?:\/|[a-z]:\/?)$/i.test(toPosix(value));
 }
 
-export function isHomeRoot(p, home = HOME) {
-  return stripTrailingSep(p).toLowerCase() === stripTrailingSep(home).toLowerCase();
+export function isUncRoot(value) {
+  const text = toPosix(value);
+  return text.startsWith('//') && text.slice(2).split('/').filter(Boolean).length <= 2;
 }
 
-export function isUncRoot(p) {
-  const raw = String(p);
-  const s = toPosix(raw);
-  const isUnc = s.startsWith('//') || raw.startsWith('\\\\');
-  if (!isUnc) return false;
-  // //server/share is a share root; anything deeper is a normal directory.
-  return s.replace(/^\/+/, '').split('/').filter(Boolean).length <= 2;
-}
-
-const SYSTEM_DIRS = /^[a-z]:\/(windows|program files|program files \(x86\)|programdata|\$recycle\.bin|system volume information)(\/|$)/;
-
-/** Windows/Unix system locations, matched on any drive rather than one root. */
-export function isSystemPath(p) {
-  const s = toPosix(p).toLowerCase();
-  if (SYSTEM_DIRS.test(s)) return true;
-  return /^\/(bin|boot|dev|etc|lib|lib64|proc|sbin|sys|usr|var)(\/|$)/.test(s);
-}
-
-export function isUnder(child, parent) {
-  const c = stripTrailingSep(child).toLowerCase();
-  const p = stripTrailingSep(parent).toLowerCase();
-  if (!p) return false;
+export function isUnder(child, parent, platform = process.platform) {
+  let c = stripTrailingSep(normalisePath(child, platform));
+  let p = stripTrailingSep(normalisePath(parent, platform));
+  if (win(platform)) { c = c.toLowerCase(); p = p.toLowerCase(); }
   return c === p || c.startsWith(p.endsWith('/') ? p : `${p}/`);
 }
 
-export function hasGlob(token) {
-  return /[*?[]/.test(String(token));
+export function isHomeRoot(value, home = HOME, platform = process.platform) {
+  return isUnder(value, home, platform) && isUnder(home, value, platform);
 }
 
-/** Directories that must never be deleted, even when a target resolves inside them. */
-export function defaultProtectedPaths(home = HOME) {
-  const win = process.platform === 'win32';
-  const list = [
-    path.join(home, '.ssh'),
-    path.join(home, '.gnupg'),
-    path.join(home, '.pi'),
-    path.join(home, '.config'),
-  ];
-  if (win) {
-    for (const drive of ['C:/', 'D:/', 'E:/']) {
-      list.push(
-        path.join(drive, 'Windows'),
-        path.join(drive, 'Program Files'),
-        path.join(drive, 'Program Files (x86)'),
-        path.join(drive, 'ProgramData'),
-      );
-    }
-  } else {
-    list.push('/bin', '/boot', '/dev', '/etc', '/lib', '/proc', '/sbin', '/sys', '/usr', '/var');
-  }
-  return list.map((p) => stripTrailingSep(p));
+export function isSystemPath(value, platform = process.platform) {
+  const text = win(platform) ? toPosix(value).toLowerCase() : String(value);
+  if (win(platform) && /^[a-z]:\/(windows|program files|program files \(x86\)|programdata|\$recycle\.bin|system volume information)(\/|$)/.test(text)) return true;
+  return /^\/(bin|boot|dev|etc|lib|lib64|proc|sbin|sys|usr|var)(\/|$)/.test(text);
 }
 
-export function describe(p) {
-  return toPosix(p);
+export const hasGlob = (value) => /[*?[]/.test(String(value));
+export function defaultProtectedPaths(home = HOME, platform = process.platform) {
+  const list = ['.ssh', '.gnupg', '.pi', '.config'].map((name) => `${home}/${name}`);
+  if (!win(platform)) list.push('/bin', '/boot', '/dev', '/etc', '/lib', '/lib64', '/proc', '/sbin', '/sys', '/usr', '/var');
+  return list.map((value) => normalisePath(value, platform));
 }
+export const describe = toPosix;

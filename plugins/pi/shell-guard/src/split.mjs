@@ -1,188 +1,146 @@
-// Minimal shell segmentation. Not a full parser: it only needs to find command
-// boundaries, quoted strings, heredocs, redirections and background operators
-// reliably enough to classify a command. Anything uncertain is reported as
-// unknown so the caller can fail open.
-
-const HEREDOC_END = /[\s;|&)]/;
-
-export function splitSegments(command) {
-  const text = String(command ?? '');
-  const segments = [];
-  let current = '';
-  let quote = null;
-
-  const push = (bg) => {
-    const value = current.trim();
-    if (value) segments.push({ text: value, background: bg });
-    current = '';
+// Bounded lexer for simple shell command lists. Unsupported control flow and
+// expansions are reported, never interpreted as evidence of safety. Not a sandbox.
+const LIMIT = 65536;
+export function parseShell(command) {
+  const segments = [], issues = [];
+  if (typeof command !== 'string' || command.length > LIMIT || command.includes('\0')) {
+    return { segments, issues: ['invalid-or-oversize-command'], uncertain: true };
+  }
+  let segment, value = '', raw = '', quote = '', started = false, dynamic = false, expansion = false;
+  let redirection = null, pending = [], groupStart = 0;
+  const fresh = () => ({ text: '', tokens: [], redirects: [], heredocs: [], connector: '', background: false });
+  segment = fresh();
+  const flush = () => {
+    if (!started) return;
+    const token = { value, raw, dynamic, expansion };
+    if (redirection) {
+      const item = { ...redirection, target: token };
+      segment.redirects.push(item);
+      if (item.op.startsWith('<<') && item.op !== '<<<') pending.push({ segment, item });
+      redirection = null;
+    } else segment.tokens.push(token);
+    value = ''; raw = ''; started = false; dynamic = false; expansion = false;
   };
-
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-
+  const push = (connector) => {
+    flush();
+    if (redirection) { issues.push('missing-redirection-target'); redirection = null; }
+    if (segment.tokens.length || segment.redirects.length) {
+      segment.connector = connector;
+      segments.push(segment);
+    }
+    if (connector === '&') {
+      for (let k = groupStart; k < segments.length; k++) segments[k].background = true;
+    }
+    if ([';', '\n', '&'].includes(connector)) groupStart = segments.length;
+    segment = fresh();
+  };
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i], next = command[i + 1];
+    segment.text += ch;
     if (quote) {
-      current += ch;
-      if (ch === quote) quote = null;
+      raw += ch;
+      if (ch === quote) quote = '';
+      else if (quote === '"' && ch === '\\' && /[$`"\\\n]/.test(next ?? '')) {
+        raw += next; if (next !== '\n') value += next; i++;
+      } else {
+        value += ch;
+        if (quote === '"' && /[$`]/.test(ch)) { dynamic = true; if (ch === '`' || next === '(') expansion = true; }
+      }
       continue;
     }
-
-    if (ch === '\\') {
-      const escaped = text[i + 1];
-      // A trailing backslash (for example `dir /s C:\`) is a path, not an escape.
-      if (escaped !== undefined && escaped !== '\n') {
-        current += ch + escaped;
-        i += 1;
-        continue;
-      }
-      current += ch;
+    if (ch === '\\' && next !== undefined) {
+      if (next === '\n') { i++; continue; }
+      // Preserve ambiguous unquoted Win32 paths for critical-path checks.
+      if (/^[a-z]:/i.test(value)) { raw += ch; value += ch; started = true; dynamic = true; continue; }
+      raw += ch + next; value += next; started = true; i++; continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; raw += ch; started = true; continue; }
+    if (ch === '#' && !started) {
+      while (i + 1 < command.length && command[i + 1] !== '\n') i++;
       continue;
     }
-
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      current += ch;
-      continue;
-    }
-
-    if (ch === '#' && (i === 0 || /\s/.test(text[i - 1]))) break;
-
-    // Heredoc: the body is data for the command, not shell syntax. Copy it
-    // verbatim so `&`, `;` or quotes inside CSS/JS/Python do not become operators.
-    if (ch === '<' && text[i + 1] === '<' && text[i + 2] !== '<') {
-      let j = i + 2;
-      let stripTabs = false;
-      if (text[j] === '-') {
-        stripTabs = true;
-        j += 1;
-      }
-      while (text[j] === ' ' || text[j] === '\t') j += 1;
-      let delimiter = '';
-      let delimQuote = null;
-      if (text[j] === "'" || text[j] === '"') {
-        delimQuote = text[j];
-        j += 1;
-      }
-      while (j < text.length) {
-        const c = text[j];
-        if (delimQuote) {
-          if (c === delimQuote) {
-            j += 1;
-            break;
-          }
-          delimiter += c;
-          j += 1;
-          continue;
+    if (ch === '\n') {
+      push('\n');
+      for (const { segment: owner, item } of pending) {
+        const delimiter = item.target.value;
+        let body = '', found = false;
+        while (i + 1 < command.length) {
+          const end = command.indexOf('\n', i + 1);
+          const stop = end < 0 ? command.length : end;
+          let line = command.slice(i + 1, stop);
+          i = stop;
+          if (item.op === '<<-') line = line.replace(/^\t+/, '');
+          if (line === delimiter) { found = true; break; }
+          body += line + '\n';
         }
-        if (HEREDOC_END.test(c)) break;
-        delimiter += c;
-        j += 1;
+        if (!found) issues.push('unterminated-heredoc');
+        const quoted = /['"\\]/.test(item.target.raw);
+        owner.heredocs.push({ body, quoted });
+        if (!quoted && /\$\(|`/.test(body)) issues.push('heredoc-expansion');
       }
-      if (delimiter) {
-        const lines = text.slice(j).split('\n');
-        let endLine = -1;
-        for (let k = 0; k < lines.length; k += 1) {
-          const candidate = stripTabs ? lines[k].replace(/^\t+/, '') : lines[k];
-          if (candidate.trimEnd() === delimiter) {
-            endLine = k;
-            break;
-          }
-        }
-        if (endLine >= 0) {
-          const body = lines.slice(0, endLine + 1).join('\n');
-          current += text.slice(i, j) + body;
-          i = j + body.length;
-          continue;
-        }
-      }
-      current += '<<';
-      i += 1;
+      pending = [];
       continue;
     }
-
-    if (ch === '&') {
-      const next = text[i + 1];
-      if (next === '&') {
-        push(false);
-        i += 1;
-        continue;
-      }
-      // 2>&1, &>file, >&2 keep the ampersand as part of the redirection
-      if (text[i - 1] === '>' || next === '>') {
-        current += ch;
-        continue;
-      }
-      push(true);
+    if (/\s/.test(ch)) { flush(); continue; }
+    const redir = /^(?:&>>?|<<<|<<-?|<>|<&|>&|>\||>>?|<)/.exec(command.slice(i));
+    if (redir) {
+      let fd;
+      if (started && /^\d+$/.test(raw)) { fd = Number(value); started = false; value = ''; raw = ''; }
+      else flush();
+      if (redirection) issues.push('missing-redirection-target');
+      let op = redir[0];
+      // Prefer descriptor duplication to the single-character output operator.
+      if ((op === '>' || op === '<') && next === '&') op += '&';
+      redirection = { fd: fd ?? (op.startsWith('<') ? 0 : 1), explicitFd: fd !== undefined, op };
+      i += op.length - 1;
       continue;
     }
-
-    if (ch === '|') {
-      push(false);
-      if (text[i + 1] === '|') i += 1;
-      continue;
+    if (ch === '&' || ch === '|' || ch === ';') {
+      let connector = ch;
+      if (next === ch && ch !== ';' || ch === '|' && next === '&') { connector += next; i++; }
+      push(connector); continue;
     }
-
-    if (ch === ';') {
-      push(false);
-      continue;
-    }
-
-    current += ch;
+    if (ch === '(' || ch === ')') { flush(); issues.push('shell-group-or-substitution'); push(';'); continue; }
+    if (ch === '{' || ch === '}') { dynamic = true; issues.push('shell-brace-expansion-or-group'); }
+    if (/[$`]/.test(ch)) { dynamic = true; if (ch === '`' || next === '(') expansion = true; }
+    raw += ch; value += ch; started = true;
   }
-
-  push(false);
-  return segments;
+  if (quote) issues.push('unterminated-quote');
+  push('');
+  if (pending.length) issues.push('unterminated-heredoc');
+  if (segments.length > 256 || segments.some((item) => item.tokens.length > 4096)) issues.push('parser-limit');
+  return { segments: segments.slice(0, 256), issues, uncertain: issues.length > 0 };
 }
 
-/** Split one segment into words, honouring single and double quotes. */
-export function words(segment) {
-  const out = [];
-  let current = '';
-  let quote = null;
-  let has = false;
-
-  for (const ch of String(segment ?? '')) {
-    if (quote) {
-      if (ch === quote) quote = null;
-      else current += ch;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      has = true;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      if (has) out.push(current);
-      current = '';
-      has = false;
-      continue;
-    }
-    current += ch;
-    has = true;
-  }
-  if (has) out.push(current);
-  return out;
-}
-
+export const splitSegments = (command) => parseShell(command).segments;
+export const words = (command) => parseShell(command).segments.flatMap((segment) => segment.tokens.map((token) => token.value));
 export function programName(token) {
-  const raw = String(token ?? '').replace(/\\/g, '/');
-  const base = raw.slice(raw.lastIndexOf('/') + 1);
-  return base.replace(/\.(exe|cmd|bat|ps1)$/i, '').toLowerCase();
+  return String(token ?? '').replace(/\\/g, '/').split('/').at(-1).replace(/\.(exe|cmd|bat|ps1)$/i, '').toLowerCase();
 }
+export const isBackground = (segments) => segments.some((segment) => segment.background);
 
-export function isBackground(segments, command) {
-  if (segments.some((s) => s.background)) return true;
-  return /(^|[^&>])&\s*$/.test(String(command ?? '').trim());
+// Track fd copies in order: `2>&1 >log` leaves stderr attached to the harness.
+export function streamsDetached(segment, piped = false) {
+  const descriptors = new Map([[0, 'harness'], [1, piped ? 'pipe' : 'harness'], [2, 'harness']]);
+  for (const { fd, explicitFd, op, target } of segment.redirects) {
+    if (op.startsWith('<<') || op === '<') { descriptors.set(fd, 'input'); continue; }
+    const bothByName = op === '>&' && !explicitFd && !/^(?:\d+|-)$/.test(target.value);
+    if ((op === '>&' || op === '<&') && !bothByName) {
+      descriptors.set(fd, target.value === '-' ? 'closed' : descriptors.get(Number(target.value)) ?? 'harness');
+      continue;
+    }
+    let sink = target.dynamic ? 'harness' : 'file';
+    const alias = /^(?:\/dev\/fd\/|\/proc\/self\/fd\/)(\d+)$/.exec(target.value);
+    if (alias) sink = descriptors.get(Number(alias[1])) ?? 'harness';
+    if (/^\/dev\/(stdout|stderr|tty|console)$/.test(target.value)) sink = 'harness';
+    if (op.startsWith('&>') || bothByName) { descriptors.set(1, sink); descriptors.set(2, sink); }
+    else descriptors.set(fd, sink);
+  }
+  if (segment.connector === '|&') descriptors.set(2, descriptors.get(1));
+  return [1, 2].every((fd) => ['file', 'closed', 'pipe'].includes(descriptors.get(fd)));
 }
-
-/**
- * A background command is safe only when its output no longer points at the
- * harness pipe. Redirecting stdout/stderr to a file is enough; `</dev/null` is
- * recommended but not required.
- */
 export function hasBackgroundRedirect(command) {
-  const text = String(command ?? '');
-  const toFile = /(?:^|[\s;|(])\d?>>?\s*[^\s&|;)]+/.test(text) || /&>\s*[^\s&|;)]+/.test(text);
-  const stdin = /<\s*\/dev\/null/.test(text) || /<\s*NUL/i.test(text);
-  return toFile || stdin;
+  const parsed = parseShell(command);
+  return !parsed.uncertain && parsed.segments.filter((segment) => segment.background).length > 0
+    && parsed.segments.every((segment) => !segment.background || streamsDetached(segment, ['|', '|&'].includes(segment.connector)));
 }
