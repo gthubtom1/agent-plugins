@@ -97,10 +97,14 @@ async function main() {
   const agentDir = path.join(scratch, 'agent');
   const target = path.join(scratch, 'outside-target');
   const other = path.join(scratch, 'outside-other');
-  for (const directory of [project, agentDir, target, other]) await mkdir(directory);
+  const trashTarget = path.join(project, 'old-cache');
+  for (const directory of [project, agentDir, target, other, trashTarget]) await mkdir(directory);
   requireCheck('authorization fixture is outside project', !inside(project, target));
   const sentinel = path.join(target, 'sentinel.txt');
+  const trashSentinel = path.join(trashTarget, 'cache.bin');
   await writeFile(sentinel, 'SDK inert fixture sentinel\n');
+  await writeFile(trashSentinel, 'SDK recoverable cache fixture\n');
+  const trashPosix = trashTarget.replace(/\\/g, '/');
   const posix = target.replace(/\\/g, '/');
   const otherPosix = other.replace(/\\/g, '/');
   const deletion = `rm -rf "${posix}"`;
@@ -275,14 +279,34 @@ async function main() {
   const throwing = await dispatch(normal, 'direct thrown tool error', 'fixture_throw', {});
   denied('direct thrown tool error', throwing);
 
-  denied('unnamed path', await dispatch(normal, 'unnamed path', 'bash', { command: deletion }));
+  for (const [label, tool, harness] of [
+    ['direct', 'bash', normal], ['nested', 'fixture_nested', normal],
+    ['independent session', 'bash', await createSession('independent session')],
+  ]) {
+    const command = `rm -rf "${trashPosix}"`;
+    await mkdir(trashTarget, { recursive: true });
+    await writeFile(trashSentinel, 'SDK recoverable cache fixture\n');
+    const run = await dispatch(harness, `${label} rm rewrites to TEMP helper`, tool, { command });
+    check(`${label}: rm reaches inert Bash`, run.result.isError === false, run.record.text);
+    check(`${label}: only helper reached Bash`, run.captures.length === 1 && /--move-to-temp/.test(run.captures[0].argv.command) && !/^rm\s/.test(run.captures[0].argv.command));
+    check(`${label}: no preflight move`, await readFile(trashSentinel, 'utf8') === 'SDK recoverable cache fixture\n');
+    check(`${label}: no UI`, harness.uiRequests.length === 0);
+  }
+  check('inert Bash never created TEMP', await access(path.join(project, 'TEMP')).then(() => false, () => true));
+  await writeFile(trashSentinel, 'later handler must preserve me');
+  normal.fixture.blockNextBash();
+  denied('later handler blocks rm after rewrite', await dispatch(normal, 'later handler blocks rm after rewrite', 'bash', { command: `rm -rf "${trashPosix}"` }));
+  check('later handler left source unchanged', await readFile(trashSentinel, 'utf8') === 'later handler must preserve me');
+  const readOnlyLoop = 'for p in AGENTS.md dev/AGENTS.md dev/agent-plugins/AGENTS.md dev/agent-plugins/plugins/AGENTS.md dev/agent-plugins/plugins/pi/AGENTS.md dev/agent-plugins/plugins/pi/shell-guard/AGENTS.md; do if test -f "$p"; then printf "%s\\n" "$p"; fi; done';
+  const loopRun = await dispatch(normal, 'exact screenshot read-only loop', 'bash', { command: readOnlyLoop });
+  allowed('exact screenshot read-only loop', loopRun, 60);
+  check('read-only loop command preserved', loopRun.captures[0]?.argv.command === readOnlyLoop);
+  for (const command of ['git status', 'rg -n token src/', 'npm run build']) {
+    const run = await dispatch(normal, `ordinary ${command}`, 'bash', { command });
+    check(`ordinary ${command}: allowed unchanged`, !run.result.isError && run.captures[0]?.argv.command === command);
+  }
   for (const source of ['interactive', 'rpc']) {
-    const label = `${source} exact user grant`;
-    const run = await dispatch(normal, label, 'bash', { command: deletion }, `删除 ${posix}`, { source });
-    check(`${label}: permitted only into inert bash`, run.result.isError === false && run.captures.length === 1);
-    check(`${label}: matching raw input and pre-agent prompt`, run.events.some((event) =>
-      event.type === 'input' && event.source === source && event.text === `删除 ${posix}`) &&
-      run.events.some((event) => event.type === 'before_agent_start' && event.prompt === `删除 ${posix}`));
+    denied(`${source} exact outside grant remains blocked`, await dispatch(normal, `${source} exact outside grant remains blocked`, 'bash', { command: deletion }, `删除 ${posix}`, { source }));
   }
   for (const [label, prompt] of [
     ['negative prompt', `不要删除 ${posix}`], ['quoted prompt', `文档示例：\`删除 ${posix}\``],
@@ -322,9 +346,8 @@ async function main() {
   for (const choice of ['cancel', 'dismiss', 'throw']) {
     const harness = await createSession(`UI ${choice}`, {}, choice);
     const label = `UI ${choice} never autoallows`;
-    denied(label, await dispatch(harness, label, 'bash', { command: deletion }));
-    check(`${label}: confirmation requested`, harness.uiRequests.length === 1 &&
-      harness.uiRequests[0].choices.includes('取消'));
+    denied(label, await dispatch(harness, label, 'bash', { command: 'printf "%s\\n" "$(pwd)"' }));
+    check(`${label}: no confirmation requested`, harness.uiRequests.length === 0);
   }
   const configured = await createSession('SettingsManager configuration', {
     timeout: { fast: 7, default: 11, heavy: 19, ceiling: 23 },
@@ -400,7 +423,7 @@ const report = {
   startedAt, finishedAt: new Date().toISOString(), sdk: SDK_DIR ? path.resolve(SDK_DIR) : null, sdkVersion,
   extension: EXT_ENTRY, counts, fatal: fatal ?? null,
   limits: { perDispatchMilliseconds: 5000, liveDispatchMilliseconds: 20000, sdkOperationBudgetMilliseconds: 50000, liveEverythingProcessMilliseconds: 15000 },
-  boundary: 'Real SDK event interception; bash execute is an inert argument recorder. No shell candidate was spawned. Optional live Everything is read-only and opt-in.',
+  boundary: 'Real SDK event interception; Bash is an inert argument recorder, including rewritten TEMP helpers. No shell candidate was spawned and no helper move was performed. Optional live Everything is read-only and opt-in.',
   sourceBefore, networkAttempts, checks, cases,
 };
 try {

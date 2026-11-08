@@ -13,9 +13,10 @@ export function createSdkFixture(ai) {
   const modelCalls = [];
   const settingsSeen = [];
   let transformedText = '';
+  let blockNextBash = false;
 
-  // The replacement records the actual post-preflight input, without parsing or
-  // executing the command. Even a broken guard cannot start a dangerous process.
+  // Record actual post-preflight arguments without executing them. Even a
+  // broken guard cannot start a dangerous process or move files in this fixture.
   async function inertBash(toolCallId, args) {
     const entry = { toolCallId, argv: structuredClone(args), timeout: args.timeout };
     executed.push(entry);
@@ -75,6 +76,10 @@ export function createSdkFixture(ai) {
     api.on('tool_call', (event) => {
       events.push({ type: 'tool_call', toolCallId: event.toolCallId, parentToolCallId: event.parentToolCallId,
         toolName: event.toolName, input: structuredClone(event.input) });
+      if (event.toolName === 'bash' && blockNextBash) {
+        blockNextBash = false;
+        return { block: true, reason: 'FIXTURE_LATER_HANDLER_BLOCK' };
+      }
     });
     api.registerTool({ name: 'bash', label: 'Inert bash', description: 'Capture arguments only; never execute commands.',
       parameters: bashSchema, execute: inertBash });
@@ -111,6 +116,7 @@ export function createSdkFixture(ai) {
     },
     clearQueue() { queued = undefined; },
     setTransformedText(text) { transformedText = text; },
+    blockNextBash() { blockNextBash = true; },
     injectUser(text, expandPromptTemplates = false) { api.sendUserMessage(text, { expandPromptTemplates }); },
     injectCustom(text) {
       api.sendMessage({ customType: 'fixture-authorship', content: text, display: false }, { triggerTurn: true });

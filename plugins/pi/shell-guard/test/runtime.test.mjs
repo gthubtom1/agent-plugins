@@ -1,8 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { registerShellGuard } from '../runtime.mjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
-function fixture({policy,executeFile,spawn,ui,settings={}}={}) {
+const execute = promisify(execFile);
+const READONLY_LOOP = 'for p in AGENTS.md dev/AGENTS.md dev/agent-plugins/AGENTS.md dev/agent-plugins/plugins/AGENTS.md dev/agent-plugins/plugins/pi/AGENTS.md dev/agent-plugins/plugins/pi/shell-guard/AGENTS.md; do if test -f "$p"; then printf "%s\\n" "$p"; fi; done';
+
+function fixture({policy,executeFile,spawn,ui,settings={},cwd=process.cwd()}={}) {
   const handlers = new Map(), tools = new Map(), commands = new Map(), messages=[];
   const api = {
     on(name,fn){ const list=handlers.get(name)??[];list.push(fn);handlers.set(name,list); },
@@ -11,9 +19,9 @@ function fixture({policy,executeFile,spawn,ui,settings={}}={}) {
     sendMessage(message){messages.push(message);},
   };
   registerShellGuard(api,{evaluate:policy,executeFile,spawn,realpath:p=>p});
-  const ctx={cwd:process.cwd(),hasUI:Boolean(ui),ui,signal:new AbortController().signal};
+  const ctx={cwd,hasUI:Boolean(ui),ui,signal:new AbortController().signal};
   async function event(name,data={}) {let value;for(const fn of handlers.get(name)??[]){const next=await fn(data,ctx);if(next!==undefined)value=next;}return value;}
-  return {event,tools,commands,messages,ctx,async prompt(text,source='interactive',expanded=text){await event('input',{source,text});await event('before_agent_start',{messageType:'user',prompt:expanded,systemPromptOptions:{sections:{}}});},async call(command,timeout){const data={toolName:'bash',toolCallId:'fixture',input:{command,...timeout===undefined?{}:{timeout}}};const result=await event('tool_call',data);return {result,input:data.input};}};
+  return {api,event,tools,commands,messages,ctx,async prompt(text,source='interactive',expanded=text){await event('input',{source,text});await event('before_agent_start',{messageType:'user',prompt:expanded,systemPromptOptions:{sections:{}}});},async call(command,timeout,parentToolCallId){const data={toolName:'bash',toolCallId:'fixture',parentToolCallId,input:{command,...timeout===undefined?{}:{timeout}}};const result=await event('tool_call',data);return {result,input:data.input};}};
 }
 
 test('raw human input only; templates, extension messages and custom runs cannot grant',async()=>{
@@ -46,19 +54,86 @@ test('assessment and UI errors fail closed',async()=>{
   assert.equal((await f.call('rm -rf fixture')).result.block,true);
 });
 
-test('confirmation is explicit, bounded, exact-command, rechecked and never cached',async()=>{
-  let calls=0,dialogs=0;
-  const f=fixture({policy:()=>{calls++;return {action:'confirm',reason:'review',timeout:60};},ui:{select:async(title,choices,opts)=>{dialogs++;assert.match(title,/rm -rf fixture/);assert.equal(choices[0],'取消');assert.equal(opts.timeout,120000);return '仅允许本次';}}});
-  assert.equal((await f.call('rm -rf fixture')).result,undefined);assert.equal(calls,2);
-  assert.equal((await f.call('rm -rf fixture')).result,undefined);assert.equal(dialogs,2);
-  for(const choice of [undefined,'取消','Yes']){const bad=fixture({policy:()=>({action:'confirm',timeout:60}),ui:{select:async()=>choice}});assert.equal((await bad.call('rm -rf fixture')).result.block,true);}
-  let n=0;const drift=fixture({policy:()=>({action:++n===1?'confirm':'block',timeout:60}),ui:{select:async()=> '仅允许本次'}});assert.equal((await drift.call('rm -rf fixture')).result.block,true);
+test('all confirmation cases return immediate non-terminating errors without UI',async()=>{
+  const f=fixture({policy:()=>({action:'confirm',reason:'review',timeout:60}),ui:{select:()=>assert.fail('UI called')}});
+  for(const parent of [undefined,'nested-parent']) {
+    const got=await f.call('printf "%s\\n" "$(pwd)"',undefined,parent);
+    assert.equal(got.result.block,true);
+    assert.notEqual(got.result.terminate,true);
+    assert.match(got.result.reason,/即时阻止/);
+  }
+});
+
+test('direct, nested and independent sessions defer intact TEMP moves until Bash executes',async()=>{
+  const root=await mkdtemp(path.join(tmpdir(),'shell-guard-trash-runtime-'));
+  try {
+    for(const [actor,parent] of [['main',undefined],['nested','parent-tool-call'],['independent',undefined]]) {
+      const name=`${actor} 'cache`;
+      await mkdir(path.join(root,name));
+      await writeFile(path.join(root,name,'content.txt'),actor);
+      const f=fixture({cwd:root,ui:{select:()=>assert.fail('UI called')}});
+      const got=await f.call(`rm -rf "${name}"`,undefined,parent);
+      assert.equal(got.result,undefined);
+      assert.match(got.input.command,/--move-to-temp/);
+      assert.equal(await readFile(path.join(root,name,'content.txt'),'utf8'),actor);
+      const {stdout}=await execute('bash',['-c',got.input.command],{cwd:root,timeout:10000});
+      assert.match(stdout,/Moved .*TEMP[\\/].*Recovery path: TEMP\//s);
+      const batches=await readdir(path.join(root,'TEMP'));
+      let found='';
+      for(const batch of batches) found=await readFile(path.join(root,'TEMP',batch,name,'content.txt'),'utf8').catch(()=>found);
+      assert.equal(found,actor);
+    }
+  } finally { await rm(root,{recursive:true,force:true}); }
+});
+
+test('dry check and later handler block have no filesystem side effects',async()=>{
+  const root=await mkdtemp(path.join(tmpdir(),'shell-guard-preflight-'));
+  try {
+    await writeFile(path.join(root,'keep.txt'),'untouched');
+    const f=fixture({cwd:root});
+    await f.commands.get('shell-guard').handler('check rm keep.txt',f.ctx);
+    f.api.on('tool_call',()=>({block:true,reason:'later handler'}));
+    const got=await f.call('rm keep.txt');
+    assert.equal(got.result.block,true);
+    assert.match(got.input.command,/--move-to-temp/);
+    assert.deepEqual(await readdir(root),['keep.txt']);
+    assert.equal(await readFile(path.join(root,'keep.txt'),'utf8'),'untouched');
+  } finally { await rm(root,{recursive:true,force:true}); }
+});
+
+test('invalid TEMP fails during helper execution and unsupported deletions never fall through',async()=>{
+  const root=await mkdtemp(path.join(tmpdir(),'shell-guard-bad-temp-'));
+  try {
+    await writeFile(path.join(root,'keep.txt'),'not lost');
+    await writeFile(path.join(root,'TEMP'),'not a directory');
+    const f=fixture({cwd:root,settings:{allow:['.*']},ui:{select:()=>assert.fail('UI called')}});
+    const got=await f.call('rm -f keep.txt');
+    assert.equal(got.result,undefined);
+    await assert.rejects(execute('bash',['-c',got.input.command],{cwd:root,timeout:10000}),/original rm was not run/);
+    for(const command of ['rm -rf ../outside','git clean -fd','find . -delete','rm keep.txt && ls','timeout 3 rm keep.txt','rm *.txt','rm "$TARGET"','unlink keep.txt','node -e "require(\'fs\').unlinkSync(\'keep.txt\')"','rm -rf TEMP','rm -rf temp','rm -rf .git','rm -rf db','rm app.sqlite3','rm -rf C:/','rm -rf /']) {
+      const denied=await f.call(command);
+      assert.equal(denied.result?.block,true,command);
+      assert.equal(denied.input.command,command);
+    }
+    assert.equal(await readFile(path.join(root,'keep.txt'),'utf8'),'not lost');
+  } finally { await rm(root,{recursive:true,force:true}); }
+});
+
+test('exact read-only loop and ordinary commands allow unchanged with finite timeout',async()=>{
+  const f=fixture({ui:{select:()=>assert.fail('UI called')}});
+  for(const command of [READONLY_LOOP,'ls','git status','rg -n token src/','npm run build']) {
+    const got=await f.call(command);
+    assert.equal(got.result,undefined,command);
+    assert.equal(got.input.command,command);
+    assert.ok(Number.isFinite(got.input.timeout)&&got.input.timeout>0);
+  }
 });
 
 test('headless confirmation blocks; hard blocks never show a dialog',async()=>{
   const f=fixture({policy:()=>({action:'confirm',timeout:60})});assert.equal((await f.call('rm -rf fixture')).result.block,true);
   const hard=fixture({policy:()=>({action:'block',reason:'protected'}),ui:{select:()=>assert.fail('hard block prompted')}});assert.equal((await hard.call('rm -rf /')).result.block,true);
 });
+
 
 test('Everything reads normal settings, uses argv without shell and marks limited output',async()=>{
   let invocation;
@@ -135,5 +210,5 @@ test('Everything paths and autostart settings are validated before execution',as
   await f.tools.get('search_files').execute('x',{query:'fixture'});
 });test('status command reports loaded module and version without external requests',async()=>{
   const f=fixture();await f.commands.get('shell-guard').handler('status',f.ctx);
-  const data=JSON.parse(f.messages[0].content);assert.equal(data.version,'0.2.2');assert.match(data.module,/runtime.mjs/);assert.match(data.boundary,/not an OS sandbox/);
+  const data=JSON.parse(f.messages[0].content);assert.equal(data.version,'0.2.3');assert.match(data.module,/runtime.mjs/);assert.match(data.boundary,/not an OS sandbox/);
 });

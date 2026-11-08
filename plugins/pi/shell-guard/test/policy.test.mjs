@@ -25,6 +25,23 @@ function expect(command, expected, extra = {}) {
   return got;
 }
 
+test('literal read-only file loop allows only its fixed test/printf grammar', () => {
+  const command = 'for p in AGENTS.md dev/AGENTS.md dev/agent-plugins/AGENTS.md dev/agent-plugins/plugins/AGENTS.md dev/agent-plugins/plugins/pi/AGENTS.md dev/agent-plugins/plugins/pi/shell-guard/AGENTS.md; do if test -f "$p"; then printf "%s\\n" "$p"; fi; done';
+  const got = run(command);
+  assert.equal(got.action, 'allow');
+  assert.equal(got.rule, 'readonly-file-loop');
+  assert.equal(got.timeout, 60);
+  for (const unsafe of [command.replace('AGENTS.md', '$(rm -rf build)'), command.replace('AGENTS.md', '$TARGET'), command.replace('printf "%s\\n" "$p"', 'rm "$p"'), `${command}; rm -rf build`, command.replace('then printf', 'then eval printf')]) {
+    assert.notEqual(run(unsafe).action, 'allow', unsafe);
+  }
+});
+
+test('deletion marker survives allowlist, nested shells and later command decisions', () => {
+  for (const command of ['rm file; ls', 'rm -rf build; printf done', 'bash -c "rm file"', 'python -c "import os; os.unlink(\'file\')"']) {
+    assert.equal(run(command, {settings:{allow:['.*']}}).deletion, true, command);
+  }
+});
+
 test('whole-disk searches are blocked', () => {
   // The exact command from the failing session.
   expect('find / -maxdepth 6 -name "*skinforge*" -newermt "2026-11-06" -type f 2>/dev/null | head -30',
