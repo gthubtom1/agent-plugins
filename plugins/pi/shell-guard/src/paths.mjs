@@ -7,8 +7,7 @@ const win = (platform) => platform === 'win32';
 const windowsPath = (value) => /^[a-z]:[\\/]/i.test(value) || /^\\\\/.test(value);
 export const toPosix = (value) => String(value).replace(/\\/g, '/');
 
-export function msysToWin(value, platform = process.platform) {
-  if (!win(platform)) return value;
+export function msysToWin(value) {
   const match = /^\/([a-z])(\/.*)?$/i.exec(value);
   return match ? `${match[1].toUpperCase()}:${match[2] || '/'}` : value;
 }
@@ -63,7 +62,7 @@ export function resolveTarget(token, cwd = process.cwd(), home = HOME, platform 
     if (!drive) return { dynamic: true, raw: text };
     text = drive[0] + text;
   }
-  text = msysToWin(text, platform);
+  text = win(platform) ? msysToWin(text) : text;
   return { path: stripTrailingSep(normalisePath(isAbsoluteAny(text) ? text : `${/[\\/]$/.test(cwd) ? cwd : cwd + '/'}${text}`, platform)) };
 }
 
@@ -88,8 +87,8 @@ export function isHomeRoot(value, home = HOME, platform = process.platform) {
 }
 
 export function isSystemPath(value, platform = process.platform) {
-  const text = win(platform) ? toPosix(value).toLowerCase() : String(value);
-  if (win(platform) && /^[a-z]:\/(windows|program files|program files \(x86\)|programdata|\$recycle\.bin|system volume information)(\/|$)/.test(text)) return true;
+  const text = toPosix(value).toLowerCase();
+  if (/^[a-z]:\/(windows|program files|program files \(x86\)|programdata|\$recycle\.bin|system volume information)(\/|$)/.test(text)) return true;
   return /^\/(bin|boot|dev|etc|lib|lib64|proc|sbin|sys|usr|var)(\/|$)/.test(text);
 }
 
