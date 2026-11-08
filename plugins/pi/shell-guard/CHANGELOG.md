@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 — 2026-11-08
+
+- Allow finite informational forms such as `grep -V`, `head --version`, `less -V` and `watch -V` without a confirmation; continue blocking stdin-waiting forms such as `grep pattern`, `head -n 5` without a file and `tail -f`.
+- Start only the configured Everything GUI with detached `spawn` when the CLI reports an IPC/service-unavailable failure, then retry the exact query once. The GUI process is never killed by the guard.
+- Validate `guiPath` and `autostart`, and keep malformed queries, invalid output, disabled autostart and unrelated CLI errors from triggering GUI startup.
+
 ## 0.2.0 — 2026-11-08
 
 Corrective review before frozen installer deployment. v0.1.0's reported replay classifications did not establish complete authorization enforcement.

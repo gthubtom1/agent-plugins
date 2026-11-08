@@ -113,7 +113,16 @@ test('commands that never return are blocked', () => {
   expect('git commit', { action: 'block', rule: 'git-commit-editor' });
 });
 
-test('normal non-interactive forms stay allowed', () => {
+test('informational forms of stdin tools and pagers are short-lived', () => {
+  for (const command of [
+    'cat --help', 'cat --version', 'grep --help', 'grep -V', 'head --version',
+    'tail --help', 'sed --version', 'sort --help', 'wc --version',
+    'less --version', 'vim --help', 'watch -V',
+  ]) expect(command, { action: 'allow' });
+  for (const command of ['cat', 'grep pattern', 'head -n 5', 'sort -h', 'wc -l']) {
+    expect(command, { action: 'block' });
+  }
+});test('normal non-interactive forms stay allowed', () => {
   expect('python script.py', { action: 'allow' });
   expect('python -c "print(1)"', { action: 'allow' });
   expect('node -e "1+1"', { action: 'allow' });

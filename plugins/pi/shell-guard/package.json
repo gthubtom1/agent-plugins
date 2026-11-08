@@ -1,6 +1,6 @@
 {
   "name": "@toti/pi-shell-guard",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Bounded shell calls for Pi: timeout classes, whole-disk search rejection, tiered delete protection, background-command checks and an Everything-backed file search tool.",
   "type": "module",
   "license": "MIT",

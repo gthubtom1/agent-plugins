@@ -4,7 +4,7 @@ export const DEFAULTS = {
   enabled: true, blockWholeDisk: true, interactive: true, requireBackgroundRedirect: true,
   timeout: { fast: 60, default: 120, heavy: 900, ceiling: 1800 },
   rm: { policy: 'tiered', grantFromUserText: true },
-  everything: { enabled: true, esPath: '', maxResults: 50 }, allow: [],
+  everything: { enabled: true, esPath: '', guiPath: '', autostart: false, maxResults: 50 }, allow: [],
 };
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 const seconds = (value, fallback) => typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.min(value, 1800) : fallback;
