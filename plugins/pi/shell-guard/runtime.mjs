@@ -1,11 +1,11 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { evaluate } from './src/policy.mjs';
-import { buildArgs, isIpcUnavailable, parseOutput, validateEverythingConfig } from './src/everything.mjs';
+import { buildArgs, isBoundedTimeout, isIpcUnavailable, parseOutput, validateEverythingConfig } from './src/everything.mjs';
 
-export const VERSION = '0.2.1';
+export const VERSION = '0.2.2';
 const run = promisify(execFile);
 const GUI_START_TIMEOUT = 5000;
 const GUIDANCE = `Shell guard checks common bash command forms before execution and applies finite timeouts. It is a heuristic guard, not an operating-system sandbox.
@@ -34,44 +34,9 @@ export function resolveReal(target) {
   throw new Error('Path ancestry exceeds resolution budget');
 }
 
-function launchDetached(spawnFile, executable, signal) {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) { reject(new Error('Everything GUI launch aborted')); return; }
-    let child;
-    let started = false;
-    let settled = false;
-    let timer;
-    const finish = (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (error) reject(error); else resolve();
-    };
-    const onSpawn = () => {
-      started = true;
-      try { child.unref?.(); } catch (error) { finish(error); return; }
-      finish();
-    };
-    const onError = (error) => {
-      if (!started) finish(error);
-    };
-    try {
-      child = spawnFile(executable, [], {detached:true, shell:false, windowsHide:true, stdio:'ignore'});
-      if (!child || typeof child.once !== 'function') throw new TypeError('Everything GUI launcher returned no child process');
-      child.once('spawn', onSpawn);
-      child.once('error', onError);
-      timer = setTimeout(() => finish(new Error('Everything GUI launch timed out')), GUI_START_TIMEOUT);
-      timer.unref?.();
-    } catch (error) {
-      finish(error);
-    }
-  });
-}
-
 export function registerShellGuard(pi, dependencies = {}) {
   const policy = dependencies.evaluate ?? evaluate;
   const executeFile = dependencies.executeFile ?? run;
-  const spawnFile = dependencies.spawn ?? spawn;
   const realpath = dependencies.realpath ?? resolveReal;
   let pendingInput = null;
   let userText = '';
@@ -166,9 +131,11 @@ export function registerShellGuard(pi, dependencies = {}) {
       } catch (error) {
         if (!autostart || !isIpcUnavailable(error)) throw queryFailure(error);
         try {
-          await launchDetached(spawnFile,guiPath,signal);
+          // Start the configured GUI once. A long-lived GUI may be killed by
+          // this bounded launch call; the service gets one exact CLI retry.
+          await executeFile(guiPath,[],{timeout:GUI_START_TIMEOUT,maxBuffer:64*1024,windowsHide:true,signal,encoding:'utf8',shell:false});
         } catch (launchError) {
-          throw new Error(`Everything auto-start failed (${launchError?.code ?? launchError?.name ?? 'error'}); No absence conclusion.`);
+          if (!isBoundedTimeout(launchError)) throw new Error(`Everything auto-start failed (${launchError?.code ?? launchError?.name ?? 'error'}); No absence conclusion.`);
         }
         try {
           // Retry the exact argv once. Do not rebuild or broaden the query.
