@@ -16,7 +16,6 @@
 | **Pi** | `pi-seep-ext · remote` | **手机连上**：局域网/Tailscale 地址、终端二维码、运行期生成密码、5 行自检；不改 pi-web | `/remote` | 🟢 生产就绪 | [查看](plugins/pi/pi-seep-ext/README.md) |
 | **Pi** | `cmd-guard` | **命令执行守卫**：自动补 timeout / 拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看](plugins/pi/cmd-guard/README.md) |
 | **Pi** | `retry-level` | **重试档位**：菜单切档 off/3/5/10/15/30/无限，状态栏常显且可点 | `/retry` | 🟢 生产就绪 | [查看](plugins/pi/retry-level/README.md) |
-| **Pi** | `pi-prompt-compat` | **人格与粘性规则兼容层**：PERSONALITY.md + RULES.md 跨轮次常驻 | `/rules-status` `/rules-reload` | 🟢 生产就绪 | [查看](plugins/pi/pi-prompt-compat/README.md) |
 | **Pi** | `shell-guard` | 命令护栏：超时分档、拒绝整盘 find/grep、删除分档（用户点名的可删，盘根/系统目录拒绝）、后台未重定向检测；另有 `search_files` 走 Everything 毫秒级查文件名 | 自动生效 + `search_files` | 0.2.2，审查中 | [查看](plugins/pi/shell-guard/README.md) |
 | **DSH** | `dsh-infinite-retry` | 仿 PI-Desktop 无限重试插件：遇网络波动/429 持续重试直到成功 | 自带设置页 Switch | 🟢 生产就绪 | [查看](plugins/dsh/dsh-infinite-retry/README.md) |
 | **PI-Desktop** | *(规划中)* | 面向 PI-Desktop 的原生 `.piplug` 扩展 | Work Panel / Sidecar | 🟡 建设中 | [分类主页](plugins/pi-desktop/README.md) |
@@ -83,7 +82,6 @@ agent-plugins/
 │   │   ├── pi-seep-ext/         #   人设 / 回退 / 远程（包形式：extensions/ + lib/ + test/）
 │   │   ├── cmd-guard/           #   单文件扩展
 │   │   ├── retry-level/
-│   │   └── pi-prompt-compat/
 │   ├── dsh/
 │   ├── claude-code/ codex/ opencode/ pi-desktop/   # 占位（只有 README）
 │   └── ...

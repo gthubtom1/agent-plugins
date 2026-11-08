@@ -11,8 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const sdkRoot = resolve(process.argv[2] || "missing-sdk-directory");
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const standalone = process.argv.includes("--standalone");
-const vendored = join(repoRoot, standalone ? "plugins/pi/pi-seep-ext" : "plugins/pi/seep-workbench/packages/pi-seep-ext");
+const vendored = join(repoRoot, "plugins/pi/seep-workbench/packages/pi-seep-ext");
 const declaration = {source:"./packages/pi-seep-ext", commands:["persona","rewind","undo-reply"], extensions:["extensions/persona.ts","extensions/rewind.ts"], upstream:{commit:"48ccdbf4271cf6a97c366f2f37d2034dcd817b58"}};
 const scratch = fs.mkdtempSync(join(os.tmpdir(), "seep-persona-rewind-"));
 const agentDir = join(scratch, "agent");
@@ -100,11 +99,10 @@ try {
   }, { get: (object, key) => key in object ? object[key] : (() => undefined) });
   const paths = { persona: join(deployed, "extensions/persona.ts"), rewind: join(deployed, "extensions/rewind.ts"),
     load: join(repoRoot, "plugins/pi/seep-workbench/extensions/load-system-prompt.ts") };
-  if (standalone) paths.load = join(repoRoot, "plugins/pi/pi-prompt-compat/prompt-compat.ts");
   const rootManifest = JSON.parse(fs.readFileSync(join(repoRoot, "package.json"), "utf8"));
   const rootLoaded = await loadExtensions(rootManifest.pi.extensions.map(rel => join(repoRoot, rel)), project);
   assert.deepEqual(rootLoaded.errors, []);
-  assert.equal(rootLoaded.extensions.length, 6);
+  assert.equal(rootLoaded.extensions.length, 5);
   assert.ok(rootManifest.pi.extensions.every(rel => !rel.includes("seep-workbench")));
   const bundleRoot = join(repoRoot,"plugins/pi/seep-workbench");
   const bundleManifest = JSON.parse(fs.readFileSync(join(bundleRoot,"package.json"),"utf8"));
@@ -159,13 +157,11 @@ try {
   let defaultPromptReference;
   const count = (text, token) => text.split(token).length - 1;
   function checkPrompt(text, choice, legacy = "SYNTH_LEGACY_PERSONALITY") {
-    for (const token of [...(standalone ? ["SYNTH_GLOBAL_RULES"] : ["SYNTH_SEEP_RULES", "边界锚"]), "SYNTH_PROJECT_CONTEXT", "SYNTH_PROJECT_RULES", "SYNTH_BASE"]) {
+    for (const token of ["SYNTH_SEEP_RULES", "边界锚", "SYNTH_PROJECT_CONTEXT", "SYNTH_PROJECT_RULES", "SYNTH_BASE"]) {
       assert.equal(count(text, token), 1, `${token}: prompt must contain exactly one copy`);
     }
     assert.ok(text.includes("<personality>project literal</personality>"), "project instructions are source material too");
-    if (standalone) {
-      for (const token of ["SYNTH_SEEP_RULES", "seep-capability-guide", "seep-boundary"]) assert.ok(!text.includes(token));
-    } else assert.ok(!text.includes("SYNTH_GLOBAL_RULES"), "project RULES must win");
+    assert.ok(!text.includes("SYNTH_GLOBAL_RULES"), "global rules stay outside the Seep workbench acceptance");
     for (const [id, token] of [["alpha", "SYNTH_ALPHA_CARD"], ["beta", "SYNTH_BETA_CARD"], ["legacy", legacy]]) {
       assert.equal(count(text, token), choice === id ? 1 : 0, `${choice}: ${token}`);
     }
@@ -331,7 +327,7 @@ try {
     let rulesPrompt = ai.getCurrentSystemPrompt(rulesContext);
     assert.equal(count(rulesPrompt, "SYNTH_DOT_PI_RULES"), 1);
     assert.ok(!rulesPrompt.includes("SYNTH_PROJECT_RULES"));
-    assert.equal(count(rulesPrompt,"SYNTH_GLOBAL_RULES"), standalone ? 1 : 0);
+    assert.equal(count(rulesPrompt,"SYNTH_GLOBAL_RULES"), 0);
     fs.unlinkSync(join(project, ".pi/RULES.md"));
     fs.unlinkSync(join(project, "RULES.md"));
     rulesContext = await legacy.runner.emitContext(rulesContext);
@@ -401,14 +397,14 @@ try {
   const hashes = Object.fromEntries(["package.json", ...declaration.extensions,
     ...fs.readdirSync(join(deployed, "lib")).map((name) => `lib/${name}`)].map((rel) =>
     [rel, createHash("sha256").update(fs.readFileSync(join(deployed, rel))).digest("hex")]));
-  const report = { result: "PASS", standalone, sdkVersion, nodeVersion: process.version, upstreamCommit: declaration.upstream.commit,
+  const report = { result: "PASS", sdkVersion, nodeVersion: process.version, upstreamCommit: declaration.upstream.commit,
     installerTested: false, networkCalls, forbiddenReads, hashes, results };
   if (auditDir) {
     fs.mkdirSync(auditDir, { recursive: true });
-    fs.writeFileSync(join(auditDir, `sdk-${sdkVersion}-${standalone ? "standalone" : "workbench"}-results.json`), JSON.stringify(report, null, 2));
-    fs.writeFileSync(join(auditDir, `sdk-${sdkVersion}-${standalone ? "standalone" : "workbench"}-contexts.json`), JSON.stringify(captures, null, 2));
+    fs.writeFileSync(join(auditDir, `sdk-${sdkVersion}-workbench-results.json`), JSON.stringify(report, null, 2));
+    fs.writeFileSync(join(auditDir, `sdk-${sdkVersion}-workbench-contexts.json`), JSON.stringify(captures, null, 2));
   }
-  console.log(JSON.stringify({ result: report.result, standalone, sdkVersion, checks: results.length, networkCalls, forbiddenReads }, null, 2));
+  console.log(JSON.stringify({ result: report.result, sdkVersion, checks: results.length, networkCalls, forbiddenReads }, null, 2));
 } finally {
   clearTimeout(deadline);
   for (const session of sessions) session.dispose();

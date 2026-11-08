@@ -13,8 +13,4 @@ for (const file of source.files) {
   assert.equal(hash(readFileSync(join(bundle,file.path))),file.sha256,file.path);
   if (seep) assert.equal(hash(readFileSync(join(seep,file.source))),file.sha256,file.source);
 }
-for (const rel of ["agent-dir.ts","inject.ts","personas.ts","pi-api.ts","session-state.ts"]) {
-  assert.equal(hash(readFileSync(join(root,"plugins/pi/pi-prompt-compat/lib",rel))),
-    hash(readFileSync(join(root,"plugins/pi/pi-seep-ext/lib",rel))), `shared helper ${rel}`);
-}
-console.log(`PASS: ${source.files.length} Seep source files; 5 shared helpers; ${seep ? "source checkout compared" : "recorded source hashes checked"}`);
+console.log(`PASS: ${source.files.length} Seep source files; ${seep ? "source checkout compared" : "recorded source hashes checked"}`);

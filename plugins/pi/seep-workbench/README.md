@@ -18,7 +18,7 @@
 
 本目录是可加载的源码包，供测试、备份和维护；不是换机部署 Seep 的捷径。
 只有已部署完整 Seep、明确采用包加载方式并已排除同名自动加载扩展时，才可手工选择它。
-不要与根包的 cmd-guard/retry-level/prompt-compat/persona/rewind 或 Seep 已部署副本叠加加载。
+不要与根包的 cmd-guard/retry-level/persona/rewind 或 Seep 已部署副本叠加加载。
 不要只挑一个 `.ts` 文件复制：保留 `extensions/` 与 `packages/` 的相对布局。
 
 ## 来源与维护
