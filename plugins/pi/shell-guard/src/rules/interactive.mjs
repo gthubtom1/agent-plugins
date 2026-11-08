@@ -20,10 +20,25 @@ const PAGER_EDITOR = new Set([
 
 const LOG_FOLLOW = new Set(['ping', 'journalctl']);
 
+const LONG_INFO_FLAGS = new Set(['--help', '--version']);
+const SHORT_INFO_FLAGS = new Map([
+  ['grep', new Set(['-V'])], ['egrep', new Set(['-V'])], ['fgrep', new Set(['-V'])], ['zgrep', new Set(['-V'])],
+  ['head', new Set(['-V'])], ['tail', new Set(['-V'])], ['sed', new Set(['-V'])],
+  ['less', new Set(['-V'])], ['more', new Set(['-V'])], ['vim', new Set(['-V'])],
+  ['vi', new Set(['-V'])], ['nvim', new Set(['-V'])], ['nano', new Set(['-V'])],
+  ['watch', new Set(['-V'])],
+]);
+
+function isImmediateInfo(program, args) {
+  const short = SHORT_INFO_FLAGS.get(program) ?? new Set();
+  return args.length > 0 && args.every((arg) => LONG_INFO_FLAGS.has(arg) || short.has(arg));
+}
+
 export function checkInteractive(program, args, options, context = {}) {
   if (!options.interactive) return null;
   const piped = context.piped === true;
   const has = (...flags) => args.some((t) => flags.some((f) => t === f || t.startsWith(`${f}=`) || t.startsWith(f)));
+  if (isImmediateInfo(program, args) && (STDIN_FILTER.has(program) || PAGER_EDITOR.has(program))) return null;
 
   // --- language shells -----------------------------------------------------
   if (BARE_REPL.has(program)) {
@@ -38,17 +53,27 @@ export function checkInteractive(program, args, options, context = {}) {
   }
 
   // --- stdin filters -------------------------------------------------------
-  if (STDIN_FILTER.has(program) && !piped) {
-    const fileArgs = args.filter((t) => !t.startsWith('-'));
-    if (fileArgs.length === 0) {
-      return block('stdin-wait', `${program} 没有文件参数，会等待标准输入直到被执行器关闭。请显式给出文件或路径。`);
+  if (program === 'tail' && has('-f', '-F', '--follow')) return block('tail-follow', 'tail -f 会持续等待新内容。改存快照（tail -n 200 file）或放到后台并重定向。');
+  if (STDIN_FILTER.has(program) && !piped && !isImmediateInfo(program, args)) {
+    const valueFlags = new Set(['-n', '--lines', '-c', '--bytes', '-e', '--regexp', '-f', '--file', '-m', '--max-count', '-A', '-B', '-C', '--context', '--include', '--exclude']);
+    const positional = [];
+    for (let i = 0; i < args.length; i++) {
+      const token = args[i];
+      if (valueFlags.has(token)) { i++; continue; }
+      if (token.startsWith('-')) continue;
+      positional.push(token);
+    }
+    const hasPatternFlag = args.some((token) => ['-e', '--regexp', '-f', '--file'].includes(token));
+    const needsPatternAndFile = ['grep', 'egrep', 'fgrep', 'sed', 'awk', 'jq'].includes(program) && !hasPatternFlag;
+    if (positional.length === 0 || (needsPatternAndFile && positional.length < 2)) {
+      return block('stdin-wait', `${program} 没有足够的文件参数，会等待标准输入直到被执行器关闭。请显式给出文件或路径。`);
     }
   }
 
   if (context.background && ['python', 'python3', 'py', 'npm', 'pnpm', 'yarn', 'bun', 'vite', 'next', 'nuxt', 'tail', 'ping', 'journalctl', 'docker', 'kubectl', 'nc', 'ncat', 'netcat', 'socat', 'scrcpy'].includes(program)) return null;
 
   // --- pagers and editors --------------------------------------------------
-  if (PAGER_EDITOR.has(program)) {
+  if (PAGER_EDITOR.has(program) && !isImmediateInfo(program, args)) {
     return block('pager-editor', `${program} 是交互式分页/编辑器，会等待按键。读取内容改用 head/sed 分段，或写入文件后再读。`);
   }
 
@@ -77,7 +102,7 @@ export function checkInteractive(program, args, options, context = {}) {
 
   // --- servers and followers ----------------------------------------------
   if (program === 'tail' && has('-f', '-F', '--follow')) return block('tail-follow', 'tail -f 会持续等待新内容。改存快照（tail -n 200 file）或放到后台并重定向。');
-  if (program === 'watch') return block('watch', 'watch 会循环刷新直到按键退出。');
+  if (program === 'watch' && !isImmediateInfo(program, args)) return block('watch', 'watch 会循环刷新直到按键退出。');
   if (program === 'ping' && !has('-c', '-n', '-w')) return block('ping-forever', 'ping 不加次数会一直跑。加 -c 4 或 -n 4。');
   if (LOG_FOLLOW.has(program) && has('-f', '--follow')) return block('log-follow', `${program} -f 会持续跟随日志。改取快照，或放到后台并重定向。`);
   if (['docker', 'kubectl'].includes(program) && args.includes('logs') && has('-f', '--follow')) {

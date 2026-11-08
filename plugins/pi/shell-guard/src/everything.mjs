@@ -1,8 +1,45 @@
 // Pure Everything CLI helpers. Invalid input/output throws for runtime to report
 // as an error, never as an empty search result or a fabricated filename.
+import path from 'node:path';
 import { isAbsoluteAny, resolveTarget } from './paths.mjs';
 const DEFAULT_LIMIT = 50;
 const MAX_RESULTS = 200;
+const CONTROL = /[\x00-\x1f\x7f]/;
+
+export function validateAbsoluteExecutable(value, label = 'Everything executable path') {
+  if (typeof value !== 'string' || !value.trim() || !path.isAbsolute(value) || CONTROL.test(value)) {
+    throw new TypeError(`${label} must be an absolute executable path`);
+  }
+  return value;
+}
+
+export function validateEverythingConfig(config = {}) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new TypeError('Invalid Everything configuration');
+  const esPath = config.esPath ?? '';
+  if (esPath !== '') validateAbsoluteExecutable(esPath, 'Everything esPath');
+  const guiPath = config.guiPath ?? '';
+  if (guiPath !== '') validateAbsoluteExecutable(guiPath, 'Everything guiPath');
+  const autostart = config.autostart ?? false;
+  if (typeof autostart !== 'boolean') throw new TypeError('Everything autostart must be boolean');
+  if (autostart && !guiPath) throw new TypeError('Everything autostart requires an absolute guiPath');
+  return { esPath, guiPath, autostart };
+}
+
+export function isIpcUnavailable(error) {
+  const code = String(error?.code ?? '').toLowerCase().replace(/[-\s]+/g, '_');
+  if (['ipc_unavailable', 'everything_ipc_unavailable', 'everything_service_unavailable'].includes(code)) return true;
+  const text = [error?.message, error?.stderr, error?.stdout]
+    .filter((value) => typeof value === 'string').join('\n').toLowerCase();
+  if (!text.includes('everything') && !text.includes('ipc')) return false;
+  return /everything\s+(?:ipc(?:\s+(?:window|service))?|service)\s+(?:is\s+)?(?:not\s+available|unavailable|not\s+found|not\s+running|failed|cannot\s+connect|connection\s+refused)/.test(text)
+    || /(?:ipc|service)\s+(?:is\s+)?(?:not\s+available|unavailable|not\s+found|not\s+running|failed|cannot\s+connect|connection\s+refused)/.test(text)
+    || /(?:not\s+available|unavailable|not\s+found|not\s+running|failed\s+to\s+connect|connection\s+refused)[\s\S]{0,80}(?:everything|ipc|service)/.test(text);
+}
+
+export function isBoundedTimeout(error) {
+  const code = String(error?.code ?? '').toUpperCase();
+  return code === 'ETIMEDOUT' || code === 'ETIME' || (error?.killed === true && ['SIGTERM', 'SIGKILL'].includes(error?.signal));
+}
 
 export function buildArgs(query, options = {}) {
   if (typeof query !== 'string' || !query.trim() || query.length > 512 || /[\x00-\x1f\x7f]/.test(query) || /^[-/]/.test(query.trimStart())) throw new TypeError('Everything query must be nonblank, at most 512 characters, and must not start with a switch');

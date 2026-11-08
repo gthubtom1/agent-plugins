@@ -1,12 +1,13 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { evaluate } from './src/policy.mjs';
-import { buildArgs, parseOutput } from './src/everything.mjs';
+import { buildArgs, isIpcUnavailable, parseOutput, validateEverythingConfig } from './src/everything.mjs';
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.2.1';
 const run = promisify(execFile);
+const GUI_START_TIMEOUT = 5000;
 const GUIDANCE = `Shell guard checks common bash command forms before execution and applies finite timeouts. It is a heuristic guard, not an operating-system sandbox.
 - Use search_files for indexed filename/path lookup and scoped rg for file contents. Index absence, limited results and backend failure do not establish that a file does not exist.
 - Name exact deletion targets. Only unambiguous current user input may grant a target; negated, quoted or uncertain intent requires confirmation. Never widen scope or rewrite a rejected command to evade a decision.
@@ -33,9 +34,44 @@ export function resolveReal(target) {
   throw new Error('Path ancestry exceeds resolution budget');
 }
 
+function launchDetached(spawnFile, executable, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new Error('Everything GUI launch aborted')); return; }
+    let child;
+    let started = false;
+    let settled = false;
+    let timer;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error); else resolve();
+    };
+    const onSpawn = () => {
+      started = true;
+      try { child.unref?.(); } catch (error) { finish(error); return; }
+      finish();
+    };
+    const onError = (error) => {
+      if (!started) finish(error);
+    };
+    try {
+      child = spawnFile(executable, [], {detached:true, shell:false, windowsHide:true, stdio:'ignore'});
+      if (!child || typeof child.once !== 'function') throw new TypeError('Everything GUI launcher returned no child process');
+      child.once('spawn', onSpawn);
+      child.once('error', onError);
+      timer = setTimeout(() => finish(new Error('Everything GUI launch timed out')), GUI_START_TIMEOUT);
+      timer.unref?.();
+    } catch (error) {
+      finish(error);
+    }
+  });
+}
+
 export function registerShellGuard(pi, dependencies = {}) {
   const policy = dependencies.evaluate ?? evaluate;
   const executeFile = dependencies.executeFile ?? run;
+  const spawnFile = dependencies.spawn ?? spawn;
   const realpath = dependencies.realpath ?? resolveReal;
   let pendingInput = null;
   let userText = '';
@@ -116,14 +152,31 @@ export function registerShellGuard(pi, dependencies = {}) {
     annotations:{readOnlyHint:true,openWorldHint:false,idempotentHint:true},
     async execute(_id, params, signal) {
       const config = settings();
-      const esPath = config.everything?.esPath;
-      if (config.everything?.enabled === false || !esPath) throw new Error('Everything backend unavailable: configure shellGuard.everything.esPath. This is not an empty search result.');
-      if (typeof esPath !== 'string' || !path.isAbsolute(esPath) || /[\x00-\x1f]/.test(esPath)) throw new Error('Everything esPath must be an absolute executable path');
+      const everythingConfig = validateEverythingConfig(config.everything ?? {});
+      if (config.everything?.enabled === false || !everythingConfig.esPath) throw new Error('Everything backend unavailable: configure shellGuard.everything.esPath. This is not an empty search result.');
+      const {esPath, guiPath, autostart} = everythingConfig;
       const limit = params.limit ?? config.everything?.maxResults ?? 50;
       const args = buildArgs(params.query,{limit,path:params.path,regex:params.regex,foldersOnly:params.foldersOnly});
+      const cliOptions = {timeout:15000,maxBuffer:1024*1024,windowsHide:true,signal,encoding:'utf8',shell:false};
+      const runCli = () => executeFile(esPath,args,cliOptions);
+      const queryFailure = (error) => new Error(`Everything query failed (${error?.code ?? error?.name ?? 'error'}); index/service unavailable or query aborted. No absence conclusion.`);
       let stdout;
-      try { ({stdout} = await executeFile(esPath,args,{timeout:15000,maxBuffer:1024*1024,windowsHide:true,signal,encoding:'utf8',shell:false})); }
-      catch (error) { throw new Error(`Everything query failed (${error?.code ?? error?.name ?? 'error'}); index/service unavailable or query aborted. No absence conclusion.`); }
+      try {
+        ({stdout} = await runCli());
+      } catch (error) {
+        if (!autostart || !isIpcUnavailable(error)) throw queryFailure(error);
+        try {
+          await launchDetached(spawnFile,guiPath,signal);
+        } catch (launchError) {
+          throw new Error(`Everything auto-start failed (${launchError?.code ?? launchError?.name ?? 'error'}); No absence conclusion.`);
+        }
+        try {
+          // Retry the exact argv once. Do not rebuild or broaden the query.
+          ({stdout} = await runCli());
+        } catch (retryError) {
+          throw queryFailure(retryError);
+        }
+      }
       const rows = parseOutput(stdout);
       const paths = []; let bytes = 0;
       for (const row of rows.slice(0,limit)) {
