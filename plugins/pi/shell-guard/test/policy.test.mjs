@@ -29,7 +29,7 @@ test('literal read-only file loop allows only its fixed test/printf grammar', ()
   const command = 'for p in AGENTS.md dev/AGENTS.md dev/agent-plugins/AGENTS.md dev/agent-plugins/plugins/AGENTS.md dev/agent-plugins/plugins/pi/AGENTS.md dev/agent-plugins/plugins/pi/shell-guard/AGENTS.md; do if test -f "$p"; then printf "%s\\n" "$p"; fi; done';
   const got = run(command);
   assert.equal(got.action, 'allow');
-  assert.equal(got.rule, 'readonly-file-loop');
+  assert.equal(got.rule, 'readonly-control');
   assert.equal(got.timeout, 60);
   for (const unsafe of [command.replace('AGENTS.md', '$(rm -rf build)'), command.replace('AGENTS.md', '$TARGET'), command.replace('printf "%s\\n" "$p"', 'rm "$p"'), `${command}; rm -rf build`, command.replace('then printf', 'then eval printf')]) {
     assert.notEqual(run(unsafe).action, 'allow', unsafe);
@@ -72,46 +72,46 @@ test('blocked whole-disk search explains the fast alternative', () => {
   assert.match(got.reason, /rg -n/);
 });
 
-test('destructive deletes are tiered', () => {
-  expect('rm notes.txt', { action: 'allow', tier: 'T0' });
-  expect('rm -rf node_modules', { action: 'allow', tier: 'T1' });
-  expect('rm -rf build', { action: 'allow', tier: 'T1' });
-  expect('rm -rf /tmp/scratch', { action: 'confirm', tier: 'T2' });
-  expect('rm -rf src', { action: 'confirm', tier: 'T2' });
+test('single literal local rm is trashed and protected or unsupported targets block', () => {
+  expect('rm notes.txt', { action: 'trash' });
+  expect('rm -rf node_modules', { action: 'trash' });
+  expect('rm -rf build', { action: 'trash' });
+  expect('rm -rf /tmp/scratch', { action: 'block' });
+  expect('rm -rf src', { action: 'trash' });
 
-  expect('rm -rf /', { action: 'block', tier: 'T3' });
-  expect('rm -rf C:\\', { action: 'block', tier: 'T3' });
-  expect('rm -rf ~', { action: 'block', tier: 'T3' });
-  expect('rm -rf $HOME', { action: 'block', tier: 'T3' });
-  expect('rm -rf D:/Project/demo/../../..', { action: 'block', tier: 'T3' });
-  expect('rm -rf C:\\Windows', { action: 'block', tier: 'T3' });
-  expect('del /s /q C:\\Windows', { action: 'block', tier: 'T3' });
-  expect('Remove-Item -Recurse -Force "C:\\Program Files"', { action: 'block', tier: 'T3' });
-  expect('rm -rf C:/Users/toti/.ssh', { action: 'block', tier: 'T3' });
-  expect('rm', { action: 'block', tier: 'T3' });
+  expect('rm -rf /', { action: 'block' });
+  expect('rm -rf C:\\', { action: 'block' });
+  expect('rm -rf ~', { action: 'block' });
+  expect('rm -rf $HOME', { action: 'block' });
+  expect('rm -rf D:/Project/demo/../../..', { action: 'block' });
+  expect('rm -rf C:\\Windows', { action: 'block' });
+  expect('del /s /q C:\\Windows', { action: 'block' });
+  expect('Remove-Item -Recurse -Force "C:\\Program Files"', { action: 'block' });
+  expect('rm -rf C:/Users/toti/.ssh', { action: 'block' });
+  expect('rm', { action: 'block' });
 
-  expect('rm -rf ../other', { action: 'confirm', tier: 'T2' });
-  expect('rm -rf *', { action: 'confirm', tier: 'T2' });
-  expect('rm -rf .', { action: 'confirm', tier: 'T2' });
-  expect('rm -rf .git', { action: 'confirm', tier: 'T2' });
-  expect('rm -rf %TEMP%/x', { action: 'confirm', tier: 'T2' });
+  expect('rm -rf ../other', { action: 'block' });
+  expect('rm -rf *', { action: 'block' });
+  expect('rm -rf .', { action: 'block' });
+  expect('rm -rf .git', { action: 'block' });
+  expect('rm -rf %TEMP%/x', { action: 'block' });
 });
 
-test('indirect deletes require confirmation, scripted deletes follow their literal path', () => {
-  expect('git clean -fdx', { action: 'confirm', tier: 'T2' });
+test('indirect and scripted deletes block, hard literals remain protected', () => {
+  expect('git clean -fdx', { action: 'block' });
   expect('git clean -n', { action: 'allow' });
-  expect('find . -name "*.tmp" -delete', { action: 'confirm', tier: 'T2' });
-  expect('ls | xargs rm', { action: 'confirm', tier: 'T2' });
+  expect('find . -name "*.tmp" -delete', { action: 'block' });
+  expect('ls | xargs rm', { action: 'block' });
 
-  // Literal directory deletion follows the same tiers as rm.
-  expect('python -c "import shutil; shutil.rmtree(\'x\')"', { action: 'confirm' });
-  expect('python -c "import shutil; shutil.rmtree(\'build\')"', { action: 'allow' });
-  expect('python -c "import shutil; shutil.rmtree(\'D:/other\')"', { action: 'confirm' });
-  expect('python -c "import shutil; shutil.rmtree(\'/\')"', { action: 'block', tier: 'T3' });
-  expect('node -e "require(\'fs\').rmSync(\'x\',{recursive:true})"', { action: 'confirm' });
+  // Recognized script deletion must not execute even for a local target.
+  expect('python -c "import shutil; shutil.rmtree(\'x\')"', { action: 'block' });
+  expect('python -c "import shutil; shutil.rmtree(\'build\')"', { action: 'block' });
+  expect('python -c "import shutil; shutil.rmtree(\'D:/other\')"', { action: 'block' });
+  expect('python -c "import shutil; shutil.rmtree(\'/\')"', { action: 'block' });
+  expect('node -e "require(\'fs\').rmSync(\'x\',{recursive:true})"', { action: 'block' });
 
-  // Dynamic deletion confirms; a string written as documentation is data.
-  expect(script('shutil.rmtree(STAGE)'), { action: 'confirm' });
+  // Dynamic deletion blocks; a string written as documentation is data.
+  expect(script('shutil.rmtree(STAGE)'), { action: 'block' });
   expect(script("open('README.md','w').write('shutil.rmtree(STAGE)')"), { action: 'allow' });
 });
 
@@ -196,7 +196,7 @@ test('allowlist and disable switches work', () => {
   expect('find / -maxdepth 1', { action: 'block' }, { settings: { allow: ['^find /'] } });
   expect('ls -la', { action: 'allow', rule: 'allowlist' }, { settings: { allow: ['^ls'] } });
   expect('rm -rf /', { action: 'allow' }, { settings: { enabled: false } });
-  expect('rm -rf /', { action: 'allow' }, { settings: { rm: { policy: 'off' } } });
+  expect('rm -rf /', { action: 'block' }, { settings: { rm: { policy: 'off' } } });
   expect('python', { action: 'allow' }, { settings: { interactive: false } });
 });
 
@@ -216,51 +216,28 @@ test('segment splitting and background detection', () => {
 });
 
 test('segments are evaluated independently', () => {
-  expect('cd work && rm -rf node_modules', { action: 'confirm' });
-  expect('cd work && rm -rf ../../outside', { action: 'confirm' });
+  expect('cd work && rm -rf node_modules', { action: 'block' });
+  expect('cd work && rm -rf ../../outside', { action: 'block' });
   expect('cd / && find / -maxdepth 2 -name x', { action: 'block' });
 });
 
-test('user-named deletes are allowed, but scope cannot be widened', () => {
-  // User explicitly names the folder: deletion goes through without a prompt.
-  expect('rm -rf ../other', { action: 'allow', rule: 'rm-user-granted' },
-    { userText: '帮我删除 D:/Project/other' });
-  expect('rm -rf .git', { action: 'allow', rule: 'rm-user-granted' },
-    { userText: '把 D:/Project/demo/.git 删掉' });
-  expect('rm -rf .', { action: 'allow', rule: 'rm-user-granted' },
-    { userText: '删除 D:/Project/demo' });
-
-  // Same command without the user naming it: still needs a confirmation.
-  expect('rm -rf ../other', { action: 'confirm' });
-
-  // No delete verb in the message: not a grant.
-  expect('rm -rf ../other', { action: 'confirm' },
-    { userText: '看看 D:/Project/other 里有什么' });
-
-  // Grant covers one path only; a second target reopens the confirmation.
-  expect('rm -rf ../other ../outside', { action: 'confirm' },
-    { userText: '删除 D:/Project/other' });
-
-  // T3 is never grantable.
-  expect('rm -rf /', { action: 'block' }, { userText: '删除 D:/ 整个盘' });
-  expect('rm -rf C:/Windows', { action: 'block' }, { userText: '删除 C:/Windows' });
-
-  // Globs and indirect deletes keep their confirmation.
-  expect('rm -rf *', { action: 'confirm' }, { userText: '删除 D:/Project/demo' });
-  expect('find . -name x -delete', { action: 'confirm' }, { userText: '删除 D:/Project/demo' });
+test('text and obsolete rm settings cannot authorize deletion or disable its checks', () => {
+  for (const command of ['rm -rf ../other', 'rm -rf .git', 'rm -rf .', 'rm -rf /']) {
+    expect(command, { action: 'block' }, { userText: 'delete all', settings: { rm: { policy: 'off', grantFromUserText: true } } });
+  }
 });
 
 test('junction targets are judged by their real path', () => {
   const realpath = (p) => (p.endsWith('/link') ? 'C:/Windows/System32' : p);
-  expect('rm -rf link', { action: 'block', tier: 'T3' }, { realpath });
-  expect('rm notes.txt', { action: 'allow' }, { realpath });
+  expect('rm -rf link', { action: 'block' }, { realpath });
+  expect('rm notes.txt', { action: 'trash' }, { realpath });
 });
 
 test('wrapper commands are unwrapped before judging', () => {
   // The live UI test found this bypass: the guard saw `timeout`, not `find`.
   expect('timeout 5 find / -maxdepth 3 -name x', { action: 'block', rule: 'whole-disk-search' });
   expect('env FOO=1 find / -name x', { action: 'block', rule: 'whole-disk-search' });
-  expect('timeout 10 rm -rf /', { action: 'block', tier: 'T3' });
+  expect('timeout 10 rm -rf /', { action: 'block' });
   expect('nohup python', { action: 'block', rule: 'bare-repl' });
 
   expect('timeout 60 python script.py', { action: 'allow' });

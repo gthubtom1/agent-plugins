@@ -12,7 +12,6 @@ export function createSdkFixture(ai) {
   const events = [];
   const modelCalls = [];
   const settingsSeen = [];
-  let transformedText = '';
   let blockNextBash = false;
 
   // Record actual post-preflight arguments without executing them. Even a
@@ -65,10 +64,6 @@ export function createSdkFixture(ai) {
     for (const name of ['session_start', 'session_tree', 'agent_start', 'agent_end', 'agent_settled']) {
       api.on(name, (event) => { events.push({ type: name, reason: event.reason }); });
     }
-    api.on('input', (event) => {
-      events.push({ type: 'input', source: event.source, text: event.text });
-      if (event.text === '/fixture-transform') return { action: 'transform', text: transformedText };
-    });
     api.on('before_agent_start', (event) => {
       events.push({ type: 'before_agent_start', messageType: event.messageType, prompt: event.prompt });
       settingsSeen.push(api.getSettings().shellGuard);
@@ -115,11 +110,7 @@ export function createSdkFixture(ai) {
       return queued.id;
     },
     clearQueue() { queued = undefined; },
-    setTransformedText(text) { transformedText = text; },
     blockNextBash() { blockNextBash = true; },
-    injectUser(text, expandPromptTemplates = false) { api.sendUserMessage(text, { expandPromptTemplates }); },
-    injectCustom(text) {
-      api.sendMessage({ customType: 'fixture-authorship', content: text, display: false }, { triggerTurn: true });
-    },
+
   };
 }

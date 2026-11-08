@@ -1,14 +1,10 @@
 import { execFile } from 'node:child_process';
-import { realpathSync } from 'node:fs';
-import path from 'node:path';
 import { promisify } from 'node:util';
 import { evaluate } from './src/policy.mjs';
 import { parseTrashableRm, trashCommand } from './src/trash.mjs';
 import { buildArgs, isBoundedTimeout, isIpcUnavailable, parseOutput, validateEverythingConfig } from './src/everything.mjs';
 
-export const VERSION = '0.2.3';
-const DELETION_RULES = new Set(['git-clean', 'find-delete', 'xargs-rm', 'script-delete-unknown']);
-const isDeletionDecision = (decision) => decision.deletion || decision.rule?.startsWith('rm-') || DELETION_RULES.has(decision.rule);
+export const VERSION = '0.3.0';
 const run = promisify(execFile);
 
 const GUI_START_TIMEOUT = 5000;
@@ -16,43 +12,16 @@ const GUIDANCE = `Shell guard checks common bash command forms before execution 
 - Use search_files for indexed filename/path lookup and scoped rg for file contents. Index absence, limited results and backend failure do not establish that a file does not exist.
 - Ordinary project-local rm of one literal target is moved during Bash execution to TEMP/<unique-batch>/<original-name>; the original rm never executes.
 - Roots, system/home/credential paths, .git, TEMP, known database path/file names, target/parent links and outside-project targets are protected. Unsupported deletion forms return an immediate tool error.
-- Every Bash command requiring confirmation returns an immediate tool error/block; no confirmation UI is opened. Direct and nested calls use the same policy.
+- Unsupported or uncertain commands return an immediate tool error/block; no UI is opened. Direct and nested calls use the same allow/trash/block policy.
 - Long-lived jobs need bounded lifecycle and separate stdout/stderr; do not assume a pipe to head or a timeout command constrains traversal scope.
 - A guard error blocks that shell call rather than silently allowing it. Other tools, arbitrary scripts, direct user shell commands and other extensions are not an OS security boundary.`;
 const object = (properties, required = []) => ({type:'object',properties,required,additionalProperties:false});
 const string = (description, maxLength = 512) => ({type:'string',description,maxLength});
 function result(value) { return {content:[{type:'text',text:JSON.stringify(value,null,2)}],details:value}; }
 
-// Resolve existing parents too; don't silently fall back on permission errors.
-export function resolveReal(target) {
-  let candidate = path.resolve(target);
-  const tail = [];
-  for (let depth = 0; depth < 128; depth++) {
-    try { return path.join(realpathSync.native(candidate), ...tail); }
-    catch (error) {
-      if (!['ENOENT','ENOTDIR'].includes(error?.code)) throw error;
-      const parent = path.dirname(candidate);
-      if (parent === candidate) throw error;
-      tail.unshift(path.basename(candidate)); candidate = parent;
-    }
-  }
-  throw new Error('Path ancestry exceeds resolution budget');
-}
-
 export function registerShellGuard(pi, dependencies = {}) {
   const policy = dependencies.evaluate ?? evaluate;
   const executeFile = dependencies.executeFile ?? run;
-  const realpath = dependencies.realpath ?? resolveReal;
-  let pendingInput = null;
-  let userText = '';
-  const reset = () => { pendingInput = null; userText = ''; };
-  for (const name of ['session_start','session_tree','session_shutdown','agent_settled']) pi.on(name, reset);
-  pi.on('input', event => {
-    // Capture pre-template raw input. Extension-authored user messages are not grants.
-    userText = '';
-    pendingInput = ['interactive','rpc'].includes(event.source) && !event.streamingBehavior && typeof event.text === 'string'
-      ? event.text : null;
-  });
   const settings = () => {
     const all = pi.getSettings?.();
     const value = all?.shellGuard ?? {};
@@ -61,14 +30,12 @@ export function registerShellGuard(pi, dependencies = {}) {
     return esPath ? {...value,everything:{...value.everything,esPath}} : value;
   };
   pi.on('before_agent_start', event => {
-    userText = event.messageType === 'user' && event.prompt === pendingInput ? pendingInput : '';
-    pendingInput = null;
     const section = event.systemPromptOptions?.sections;
     if (section) section.shell_guard = GUIDANCE;
     else return {systemPrompt:`${event.systemPrompt ?? ''}\n\n${GUIDANCE}`};
   });
 
-  const options = ctx => ({cwd:ctx.cwd,projectRoot:ctx.cwd,home:undefined,platform:process.platform,settings:settings(),userText,realpath});
+  const options = ctx => ({cwd:ctx.cwd,projectRoot:ctx.cwd,home:undefined,platform:process.platform,settings:settings()});
   pi.on('tool_call', async (event, ctx) => {
     if (event.toolName !== 'bash') return;
     try {
@@ -76,18 +43,16 @@ export function registerShellGuard(pi, dependencies = {}) {
       const command = event.input.command;
       const initialOptions = options(ctx);
       const decision = policy(command,{...initialOptions,explicitTimeout:event.input.timeout});
-      if (!decision || !['allow','confirm','block'].includes(decision.action)) throw new Error('Invalid policy decision');
+      if (!decision || !['allow','trash','block'].includes(decision.action)) throw new Error('Invalid policy decision');
       if (decision.action === 'block') return {block:true,reason:decision.reason ?? 'shell-guard: blocked'};
       if (!Number.isFinite(decision.timeout) || decision.timeout <= 0 || decision.timeout > 2147483) throw new Error('Policy returned an invalid timeout');
 
-      if (isDeletionDecision(decision)) {
+      if (decision.action === 'trash') {
         const trashPlan = parseTrashableRm(command, initialOptions);
         if (!trashPlan) return {block:true,reason:'shell-guard：此删除形式或目标不能安全移入项目 TEMP，已阻止；原始删除命令未执行。请使用单个项目内字面目标；TEMP、.git、数据库和受保护路径不能自动清理。'};
         // Mutate only arguments here. Actual I/O belongs to Bash execution,
         // after every later tool_call handler has had a chance to block.
         event.input.command = trashCommand(trashPlan);
-      } else if (decision.action === 'confirm') {
-        return {block:true,reason:`shell-guard：${decision.reason ?? '命令需要确认'}。已即时阻止本次调用，未执行、未打开确认界面。请简化为可判定的具体命令。`};
       }
       // Enforce the result even when a caller supplied an explicit excessive timeout.
       event.input.timeout = decision.timeout;
@@ -105,7 +70,7 @@ export function registerShellGuard(pi, dependencies = {}) {
       if (text.startsWith('check ')) {
         const command = text.slice(6).trim();
         if (!command || command.length > 6000) throw new Error('check需要不超过6000字符的命令。');
-        data = {version:VERSION,module:import.meta.url,executed:false,decision:policy(command,{...options(ctx),userText:''}),note:'Dry assessment only; does not execute, approve or change settings.'};
+        data = {version:VERSION,module:import.meta.url,executed:false,decision:policy(command,options(ctx)),note:'Dry assessment only; does not execute, approve or change settings.'};
       } else {
         if (text && text !== 'status') throw new Error('用法：/shell-guard [status|check <command>]');
         const config = settings();

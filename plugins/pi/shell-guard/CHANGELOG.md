@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-11-08
+
+- Replace confirmation tiers, generated-directory privileges and raw-user-input grants with `allow/trash/block`. No input capture, grant lifecycle or confirmation UI remains. Explicit `shellGuard.enabled: false` remains an opt-out.
+- Vendor the unmodified six-file unbash 3.0.0 runtime import graph and ISC license, with verified archive integrity. No build, package dependency, runtime install or download is required.
+- Validate complete ASTs for finite literal-list `for` and read-only `if` branches, including bracket tests, quoting, multiline and Unicode paths. Positively validate echo, literal-format printf and a small cat/head/stat argv subset; reject substitutions, mutation, unknown calls, writes, background work and parser errors.
+- Require a complete standalone AST command plus existing literal lexer checks before rewriting one project-local rm to the Node TEMP helper. All target I/O stays in Bash execution; raw parent-traversal components are rejected before normalization, and hard paths, TEMP, metadata, named database storage and target/parent links remain protected. Unsupported direct, indirect, compound or nested deletes never fall through to rm.
+- Preserve finite timeout injection, valid explicit values within the local ceiling, search/interactive/background rules and Everything one-start/one-exact-retry behavior. Record upstream inspiration separately from the licensed vendored code.
+
 ## 0.2.3 — 2026-11-08
 
 - Both main-agent and child-agent ordinary project-local `rm` calls use the same rule: rewrite Bash to the existing trash module's Node helper, then rename one literal target into `TEMP/<unique-batch>/<original-name>` during execution and report its recovery path. Preflight and dry checks never move files; later handlers may still block.

@@ -1,6 +1,6 @@
 // A small lexer for inline Python/JS deletion calls, not a language interpreter.
-// Strings/comments are data; dynamic targets and unsupported execution confirm.
-const uncertain = () => ({ action: 'confirm', tier: 'T2', rule: 'script-delete-unknown', reason: '内联脚本含动态删除或执行，无法静态确定目标，需要明确确认。' });
+// Strings/comments are data; dynamic targets and unsupported execution block.
+const uncertain = () => ({ action: 'block', rule: 'script-delete-unknown', reason: '内联脚本含动态删除或执行，无法静态确定目标，无法安全判定，已阻止。' });
 
 function lex(source) {
   const tokens = [];
@@ -54,7 +54,7 @@ export function scriptedDeletes(program, args, options, classifyTarget) {
   const sources = inlineSources(program, args, options);
   let decision = null;
   const merge = (next) => {
-    if (!decision || ({ allow: 0, confirm: 1, block: 2 })[next.action] >= ({ allow: 0, confirm: 1, block: 2 })[decision.action]) decision = next;
+    if (!decision || ({ allow: 0, trash: 1, block: 2 })[next.action] >= ({ allow: 0, trash: 1, block: 2 })[decision.action]) decision = next;
   };
   for (const source of sources) {
     const tokens = lex(source);
@@ -94,7 +94,7 @@ export function scriptedDeletes(program, args, options, classifyTarget) {
       else merge(classifyTarget(resolved, options, { recursive, raw: target.value }));
     }
     // Imported aliases and computed method calls cannot be safely resolved by
-    // this lexer. Request confirmation instead of pretending they do nothing.
+    // this lexer. Block instead of pretending they do nothing.
     if (tokens.some((t, i) => t.type === 'word' && /^(rmtree|rimraf|rmSync|unlinkSync|rmdirSync)$/.test(t.value) && tokens[i + 1]?.value !== '(')
         || tokens.some((t, i) => t.type === 'word' && /^(rm|rmdir|unlink|remove)$/.test(t.value) && tokens[i + 1]?.value !== '(') && tokens.some((t) => /^(import|require|from)$/.test(t.value))
         || tokens.some((t, i) => ['fs', 'os', 'shutil', 'promises'].includes(t.value) && tokens[i + 1]?.value === '[')
