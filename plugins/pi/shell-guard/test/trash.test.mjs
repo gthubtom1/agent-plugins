@@ -34,9 +34,13 @@ test('TEMP planning rejects ambiguous, broad, outside, protected and compound rm
       'rm -rf ../outside', 'rm -rf *.tmp', 'rm -rf "$TARGET"', 'rm -rf TEMP',
       'rm -rf a.tmp b.tmp', 'rm -rf a.tmp && echo done', 'timeout 3 rm -rf a.tmp',
       'rm -rf a.tmp a.tmp/nested', 'rm -rf .git', 'rm -rf temp', 'rm -rf TeMp/file',
+      'rm --unknown a.tmp', 'rm --preserve-root a.tmp', 'rm "unclosed', 'rm a.tmp )',
+      'rm -rf link/../cache', 'rm -rf "link/.. /cache"',
+      'rm -rf db/child', 'rm -rf app.sqlite3/cache',
       'rm -rf db', 'rm -rf data/storage', 'rm app.db', 'rm app.sqlite', 'rm app.sqlite3',
       'rm -rf "$HOME/cache"', 'rm -rf D:\\work\\cache',
     ]) assert.equal(parseTrashableRm(command, { cwd: f.root, projectRoot: f.root }), null, command);
+    assert.ok(parseTrashableRm('rm -rf ./cache', { cwd: f.root, projectRoot: f.root }));
   } finally {
     await f.cleanup();
   }

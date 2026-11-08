@@ -1,3 +1,5 @@
+// Host Bash interception/default injection follows the timeout-plugin design
+// reference in THIRD_PARTY_NOTICES.md; classes and the enforced ceiling are local.
 // Contextual timeout classes. Routine inspection is short; generic scripts get
 // the default. Only recognized builds, analysis and transfers get the long class.
 const FAST = new Set([

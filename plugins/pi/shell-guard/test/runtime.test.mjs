@@ -3,7 +3,7 @@ import test from 'node:test';
 import { registerShellGuard } from '../runtime.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -18,28 +18,19 @@ function fixture({policy,executeFile,spawn,ui,settings={},cwd=process.cwd()}={})
     registerTool(tool){tools.set(tool.name,tool);},registerCommand(name,cmd){commands.set(name,cmd);},
     sendMessage(message){messages.push(message);},
   };
-  registerShellGuard(api,{evaluate:policy,executeFile,spawn,realpath:p=>p});
+  registerShellGuard(api,{evaluate:policy,executeFile,spawn});
   const ctx={cwd,hasUI:Boolean(ui),ui,signal:new AbortController().signal};
   async function event(name,data={}) {let value;for(const fn of handlers.get(name)??[]){const next=await fn(data,ctx);if(next!==undefined)value=next;}return value;}
-  return {api,event,tools,commands,messages,ctx,async prompt(text,source='interactive',expanded=text){await event('input',{source,text});await event('before_agent_start',{messageType:'user',prompt:expanded,systemPromptOptions:{sections:{}}});},async call(command,timeout,parentToolCallId){const data={toolName:'bash',toolCallId:'fixture',parentToolCallId,input:{command,...timeout===undefined?{}:{timeout}}};const result=await event('tool_call',data);return {result,input:data.input};}};
+  return {api,event,tools,commands,messages,ctx,handlers,async prompt(text,source='interactive',expanded=text){await event('input',{source,text});await event('before_agent_start',{messageType:'user',prompt:expanded,systemPromptOptions:{sections:{}}});},async call(command,timeout,parentToolCallId){const data={toolName:'bash',toolCallId:'fixture',parentToolCallId,input:{command,...timeout===undefined?{}:{timeout}}};const result=await event('tool_call',data);return {result,input:data.input};}};
 }
 
-test('raw human input only; templates, extension messages and custom runs cannot grant',async()=>{
-  let seen;
-  const f=fixture({policy:(_command,options)=>{seen=options;return {action:'allow',timeout:60};}});
-  await f.prompt('delete D:/fixture');await f.call('echo ok');assert.equal(seen.userText,'delete D:/fixture');
-  await f.event('agent_settled');await f.call('echo ok');assert.equal(seen.userText,'');
-  await f.prompt('delete D:/fixture','extension');await f.call('echo ok');assert.equal(seen.userText,'');
-  await f.prompt('/template','interactive','delete D:/fixture');await f.call('echo ok');assert.equal(seen.userText,'');
-  await f.prompt('delete D:/fixture');await f.event('before_agent_start',{messageType:'custom',systemPromptOptions:{sections:{}}});await f.call('echo ok');assert.equal(seen.userText,'');
-});
-
-test('session transitions and steering clear grants',async()=>{
-  let text;
-  const f=fixture({policy:(_command,options)=>{text=options.userText;return {action:'allow',timeout:60};}});
-  for(const name of ['session_tree','session_start','session_shutdown']){await f.prompt('delete D:/fixture');await f.event(name);await f.call('echo ok');assert.equal(text,'');}
-  await f.event('input',{source:'rpc',text:'delete D:/fixture',streamingBehavior:'steer'});
-  await f.event('before_agent_start',{messageType:'user',prompt:'delete D:/fixture',systemPromptOptions:{sections:{}}});await f.call('echo ok');assert.equal(text,'');
+test('runtime registers no input or grant lifecycle handlers',async()=>{
+  const f=fixture();
+  assert.equal(f.handlers.has('input'),false);
+  for(const name of ['session_start','session_tree','session_shutdown','agent_settled']) assert.equal(f.handlers.has(name),false);
+  const before=await f.call('rm -rf ../outside');
+  await f.prompt('delete ../outside');
+  assert.deepEqual((await f.call('rm -rf ../outside')).result,before.result);
 });
 
 test('policy clamp overrides explicit timeout and invalid policy results block',async()=>{
@@ -48,19 +39,27 @@ test('policy clamp overrides explicit timeout and invalid policy results block',
   for(const seconds of [NaN,Infinity,0,-1,2147484]){const bad=fixture({policy:()=>({action:'allow',timeout:seconds})});assert.equal((await bad.call('echo ok')).result.block,true);}
 });
 
-test('assessment and UI errors fail closed',async()=>{
+test('explicit disabled policy passes original command with a finite timeout',async()=>{
+  const f=fixture({settings:{enabled:false}});
+  const got=await f.call('rm -rf /',99999);
+  assert.equal(got.result,undefined);
+  assert.equal(got.input.command,'rm -rf /');
+  assert.equal(got.input.timeout,1800);
+});
+
+test('assessment errors and invalid actions fail closed',async()=>{
   for(const policy of [()=>{throw Error('fixture failure');},()=>null]){const f=fixture({policy});const got=await f.call('rm -rf fixture');assert.equal(got.result.block,true);}
-  const f=fixture({policy:()=>({action:'confirm',reason:'review',timeout:60}),ui:{select:()=>{throw Error('dialog failed');}}});
+  const f=fixture({policy:()=>({action:'unknown',reason:'review',timeout:60}),ui:{select:()=>{throw Error('dialog failed');}}});
   assert.equal((await f.call('rm -rf fixture')).result.block,true);
 });
 
-test('all confirmation cases return immediate non-terminating errors without UI',async()=>{
-  const f=fixture({policy:()=>({action:'confirm',reason:'review',timeout:60}),ui:{select:()=>assert.fail('UI called')}});
+test('uncertainty returns immediate non-terminating errors without UI',async()=>{
+  const f=fixture({ui:{select:()=>assert.fail('UI called')}});
   for(const parent of [undefined,'nested-parent']) {
     const got=await f.call('printf "%s\\n" "$(pwd)"',undefined,parent);
     assert.equal(got.result.block,true);
     assert.notEqual(got.result.terminate,true);
-    assert.match(got.result.reason,/即时阻止/);
+    assert.equal(got.input.command,'printf "%s\\n" "$(pwd)"');
   }
 });
 
@@ -101,6 +100,28 @@ test('dry check and later handler block have no filesystem side effects',async()
   } finally { await rm(root,{recursive:true,force:true}); }
 });
 
+test('raw link parent traversal blocks without changing either cache location',async()=>{
+  const scratch=await realpath(await mkdtemp(path.join(tmpdir(),'shell-guard-raw-route-')));
+  try {
+    const project=path.join(scratch,'project'), outside=path.join(scratch,'outside');
+    await mkdir(project);
+    await mkdir(path.join(outside,'child'),{recursive:true});
+    const insideBytes=Buffer.from([0,1,2,255]), outsideBytes=Buffer.from([255,3,2,0]);
+    await writeFile(path.join(project,'cache'),insideBytes);
+    await writeFile(path.join(outside,'cache'),outsideBytes);
+    await symlink(path.join(outside,'child'),path.join(project,'link'),'junction');
+    const f=fixture({cwd:project});
+    for(const command of ['rm -rf link/../cache','rm -rf "link/.. /cache"']) {
+      const got=await f.call(command);
+      assert.equal(got.result?.block,true,command);
+      assert.equal(got.input.command,command);
+    }
+    assert.deepEqual(await readFile(path.join(project,'cache')),insideBytes);
+    assert.deepEqual(await readFile(path.join(outside,'cache')),outsideBytes);
+    assert.deepEqual((await readdir(project)).sort(),['cache','link']);
+  } finally { await rm(scratch,{recursive:true,force:true}); }
+});
+
 test('invalid TEMP fails during helper execution and unsupported deletions never fall through',async()=>{
   const root=await realpath(await mkdtemp(path.join(tmpdir(),'shell-guard-bad-temp-')));
   try {
@@ -129,8 +150,8 @@ test('exact read-only loop and ordinary commands allow unchanged with finite tim
   }
 });
 
-test('headless confirmation blocks; hard blocks never show a dialog',async()=>{
-  const f=fixture({policy:()=>({action:'confirm',timeout:60})});assert.equal((await f.call('rm -rf fixture')).result.block,true);
+test('headless uncertainty and hard blocks never show a dialog',async()=>{
+  const f=fixture();assert.equal((await f.call('echo "$(pwd)"')).result.block,true);
   const hard=fixture({policy:()=>({action:'block',reason:'protected'}),ui:{select:()=>assert.fail('hard block prompted')}});assert.equal((await hard.call('rm -rf /')).result.block,true);
 });
 
@@ -210,5 +231,5 @@ test('Everything paths and autostart settings are validated before execution',as
   await f.tools.get('search_files').execute('x',{query:'fixture'});
 });test('status command reports loaded module and version without external requests',async()=>{
   const f=fixture();await f.commands.get('shell-guard').handler('status',f.ctx);
-  const data=JSON.parse(f.messages[0].content);assert.equal(data.version,'0.2.3');assert.match(data.module,/runtime.mjs/);assert.match(data.boundary,/not an OS sandbox/);
+  const data=JSON.parse(f.messages[0].content);assert.equal(data.version,'0.3.0');assert.match(data.module,/runtime.mjs/);assert.match(data.boundary,/not an OS sandbox/);
 });

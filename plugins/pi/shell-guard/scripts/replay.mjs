@@ -45,7 +45,6 @@ const rows = commands.map((command, index) => {
     command,
     action: decision.action,
     rule: decision.rule,
-    tier: decision.tier,
     timeout: decision.timeout,
     reason: decision.reason,
   };

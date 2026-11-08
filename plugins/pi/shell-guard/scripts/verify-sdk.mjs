@@ -17,7 +17,7 @@ const EXT_ENTRY = path.join(EXT, 'index.ts');
 const SDK_DIR = process.env.PI_SDK_DIR || process.env.PI_WEB_RUNTIME;
 const WORKSPACE = path.resolve(HERE, '..', '..', '..', '..', '..', '..');
 const REPORT = path.resolve(process.env.PI_SHELL_GUARD_REPORT || path.join(WORKSPACE,
-  'verification/shell-guard-review-2026-11-08/sdk-verification.json'));
+  'verification/shell-guard-adaptation-2026-11-08/sdk-verification.json'));
 const checks = [];
 const cases = [];
 const sessions = new Set();
@@ -90,8 +90,7 @@ async function main() {
     import(pathToFileURL(aiPath).href), import(pathToFileURL(path.join(path.resolve(SDK_DIR), 'dist/index.js')).href),
   ]), 'SDK imports', 10000);
 
-  // Fixtures live outside source/deployed packages. The reviewed policy does
-  // not automatically grant arbitrary temp-directory deletion.
+  // Fixtures live outside source/deployed packages; candidate deletions are inert.
   scratch = await mkdtemp(path.join(os.tmpdir(), 'shell-guard-sdk-'));
   const project = path.join(scratch, 'project');
   const agentDir = path.join(scratch, 'agent');
@@ -99,7 +98,7 @@ async function main() {
   const other = path.join(scratch, 'outside-other');
   const trashTarget = path.join(project, 'old-cache');
   for (const directory of [project, agentDir, target, other, trashTarget]) await mkdir(directory);
-  requireCheck('authorization fixture is outside project', !inside(project, target));
+  requireCheck('deletion fixture is outside project', !inside(project, target));
   const sentinel = path.join(target, 'sentinel.txt');
   const trashSentinel = path.join(trashTarget, 'cache.bin');
   await writeFile(sentinel, 'SDK inert fixture sentinel\n');
@@ -140,8 +139,6 @@ async function main() {
       noPromptTemplates: true, noThemes: true, noContextFiles: true,
       disabledBuiltinExtensions: ['mcp', 'codemode', 'tool_search'],
       systemPrompt: 'INERT-SDK-VERIFICATION', appendSystemPrompt: [],
-      promptsOverride: () => ({ prompts: [{ name: 'fixture-delete', description: 'Synthetic authorization template',
-        content: `删除 ${posix}`, filePath: fileURLToPath(import.meta.url), sourceInfo: { source: 'fixture' } }], diagnostics: [] }),
     });
     await bounded(() => loader.reload(), `${label}: extension load`);
     const loaded = loader.getExtensions();
@@ -187,21 +184,11 @@ async function main() {
     const start = { executed: fixture.executed.length, events: fixture.events.length,
       execution: executionEvents.length, calls: fixture.modelCalls.length };
     const id = fixture.queue(name, args);
-    let unsubscribe = () => {};
     try {
-      let run;
-      if (options.inject) {
-        run = new Promise((resolve) => {
-          unsubscribe = session.subscribe((event) => { if (event.type === 'agent_settled') resolve(); });
-        });
-        if (options.inject === 'custom') fixture.injectCustom(prompt);
-        else fixture.injectUser(prompt, options.expand === true);
-      } else {
-        run = session.prompt(prompt, { source: options.source ?? 'interactive' });
-      }
+      const run = session.prompt(prompt, { source: options.source ?? 'interactive' });
       await bounded(run, label, options.deadline ?? 5000);
       await bounded(session.waitForIdle(), `${label}: settle`);
-    } finally { unsubscribe(); fixture.clearQueue(); }
+    } finally { fixture.clearQueue(); }
     const result = session.messages.findLast((message) => message.role === 'toolResult' && message.toolCallId === id);
     if (!result) throw new Error(`${label}: SDK produced no tool result`);
     const events = fixture.events.slice(start.events);
@@ -306,42 +293,31 @@ async function main() {
     check(`ordinary ${command}: allowed unchanged`, !run.result.isError && run.captures[0]?.argv.command === command);
   }
   for (const source of ['interactive', 'rpc']) {
-    denied(`${source} exact outside grant remains blocked`, await dispatch(normal, `${source} exact outside grant remains blocked`, 'bash', { command: deletion }, `删除 ${posix}`, { source }));
+    const label = `${source} outside target blocks independently of prompt`;
+    denied(label, await dispatch(normal, label, 'bash', { command: deletion }, `删除 ${posix}`, { source }));
   }
-  for (const [label, prompt] of [
-    ['negative prompt', `不要删除 ${posix}`], ['quoted prompt', `文档示例：\`删除 ${posix}\``],
-    ['uncertain prompt', `是否应该删除 ${posix}？`],
-  ]) denied(label, await dispatch(normal, label, 'bash', { command: deletion }, prompt));
-  denied('grant cannot widen', await dispatch(normal, 'grant cannot widen', 'bash',
-    { command: `rm -rf "${posix}" "${otherPosix}"` }, `删除 ${posix}`));
-  denied('grant resets after settled', await dispatch(normal, 'grant resets after settled', 'bash', { command: deletion }));
-  const extension = await dispatch(normal, 'extension-source prompt', 'bash', { command: deletion },
-    `删除 ${posix}`, { source: 'extension' });
-  denied('extension-source prompt', extension);
-  for (const expand of [false, true]) {
-    const label = `sendUserMessage expand=${expand}`;
-    const run = await dispatch(normal, label, 'bash', { command: deletion }, `删除 ${posix}`, { inject: 'user', expand });
-    denied(label, run);
-    check(`${label}: actual extension authorship`, run.events.some((event) =>
-      event.type === 'input' && event.source === 'extension'));
+  for (const command of [
+    `rm -rf "${posix}" "${otherPosix}"`, 'rm -rf TEMP', 'rm -rf .git', 'rm app.sqlite3',
+    'rm a b', 'rm a && echo done', 'rm --unknown a', 'unlink a', 'find . -delete',
+    'rm -rf link/../cache', 'rm -rf "link/.. /cache"',
+    'python -c "import os; os.unlink(\'file\')"',
+  ]) denied(`unsupported deletion ${command}`, await dispatch(normal, `unsupported deletion ${command}`, 'bash', { command }));
+  for (const [label, command] of [
+    ['bracket and Unicode loop', 'for p in "目录/说明 文档.md" AGENTS.md; do if [ -f "$p" ]; then printf \'%s\\n\' "$p"; fi; done'],
+    ['simple echo loop', 'for p in a b; do echo $p; done'],
+    ['multiline loop', 'for p in a b\ndo\n if test -d "${p}"\n then\n echo "$p"\n fi\ndone'],
+  ]) {
+    const run = await dispatch(normal, label, 'bash', { command });
+    allowed(label, run, 60);
+    check(`${label}: original command preserved`, run.captures[0]?.argv.command === command);
   }
-  const custom = await dispatch(normal, 'custom message trigger', 'bash', { command: deletion },
-    `删除 ${posix}`, { inject: 'custom' });
-  denied('custom message trigger', custom);
-  check('custom message: genuine custom start', custom.events.some((event) =>
-    event.type === 'before_agent_start' && event.messageType === 'custom'));
-  const template = await dispatch(normal, 'expanded template', 'bash', { command: deletion }, '/fixture-delete');
-  denied('expanded template', template);
-  check('template: raw and expanded prompts differ', template.events.some((event) =>
-    event.type === 'input' && event.text === '/fixture-delete') && template.events.some((event) =>
-    event.type === 'before_agent_start' && event.prompt === `删除 ${posix}`));
-  normal.fixture.setTransformedText(`删除 ${posix}`);
-  denied('extension input transform', await dispatch(normal, 'extension input transform', 'bash', { command: deletion }, '/fixture-transform'));
-
-  const firstUser = normal.session.sessionManager.getBranch().find((entry) => entry.type === 'message' && entry.message.role === 'user');
-  await bounded(() => normal.session.navigateTree(firstUser.id, { summarize: false }), 'tree navigation');
-  check('session tree lifecycle emitted', normal.fixture.events.some((event) => event.type === 'session_tree'));
-  denied('grant absent after tree navigation', await dispatch(normal, 'grant absent after tree navigation', 'bash', { command: deletion }));
+  for (const command of [
+    'for p in a; do if [ -f "$p" ]; then echo yes; else rm "$p"; fi; done',
+    'for p in $(echo a); do echo "$p"; done',
+    'for p in a; do cat <(echo a); done',
+    'for p in a; do printf "%n" out; done',
+    'for p in a; do echo "$p"',
+  ]) denied(`unsafe AST ${command}`, await dispatch(normal, `unsafe AST ${command}`, 'bash', { command }));
 
   for (const choice of ['cancel', 'dismiss', 'throw']) {
     const harness = await createSession(`UI ${choice}`, {}, choice);
@@ -429,7 +405,7 @@ const report = {
 try {
   if (inside(EXT, REPORT)) throw new Error('Report destination is inside extension source; no report was written');
   await mkdir(path.dirname(REPORT), { recursive: true });
-  await writeFile(REPORT, `${JSON.stringify(report, null, 2)}\n`);
+  await writeFile(REPORT, `${JSON.stringify(report, null, 2)}\n`, { flag: 'wx' });
 } catch (error) {
   console.error(JSON.stringify({ ok: false, reportWriteError: String(error.message) }));
   process.exitCode = 2;

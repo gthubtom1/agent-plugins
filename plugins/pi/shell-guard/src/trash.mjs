@@ -6,6 +6,7 @@ import { normalizeOptions } from './config.mjs';
 import { hasGlob, isUnder, resolveTarget } from './paths.mjs';
 import { hardTarget } from './rules/rm.mjs';
 import { parseShell } from './split.mjs';
+import { parse } from './vendor/unbash/parser.js';
 
 const FLAGS = new Set(['-r', '-R', '-f', '-v', '--recursive', '--force', '--verbose']);
 const DATABASE_DIRS = new Set(['db', 'database', 'databases', 'data', 'pgdata', 'postgres', 'postgresql', 'mysql', 'mariadb', 'mongodb', 'redis', 'leveldb', 'rocksdb']);
@@ -33,6 +34,14 @@ function assertSafeTarget(root, target, options) {
 }
 
 export function parseTrashableRm(command, { cwd, projectRoot = cwd, home, platform = process.platform, settings } = {}) {
+  if (typeof command !== 'string' || command.length > 65536 || command.includes('\0')) return null;
+  // Require one complete AST command as well as the local literal-token
+  // contract. Parse errors never return the original deletion command.
+  try {
+    const ast = parse(command), statement = ast.commands[0], node = statement?.command;
+    if (ast.errors?.length || ast.commands.length !== 1 || statement.type !== 'Statement' || statement.background || statement.redirects.length
+      || node?.type !== 'Command' || node.prefix.length || node.redirects.length || node.name?.value !== 'rm') return null;
+  } catch { return null; }
   const parsed = parseShell(command);
   if (parsed.uncertain || parsed.segments.length !== 1) return null;
   const segment = parsed.segments[0];
@@ -53,6 +62,9 @@ export function parseTrashableRm(command, { cwd, projectRoot = cwd, home, platfo
       continue;
     }
     if (target || !token.value || /[\x00-\x1f\x7f]/.test(token.value) || hasGlob(token.value)) return null;
+    // Do not normalize away a parent traversal before the helper checks links.
+    // A raw link/../cache route can name a different file than its lexical path.
+    if (token.value.split(/[\\/]/).some(component => component.replace(/ +$/, '') === '..')) return null;
     const resolved = resolveTarget(token.value, cwd, home, platform);
     if (!resolved?.path || resolved.dynamic) return null;
     target = path.resolve(resolved.path);

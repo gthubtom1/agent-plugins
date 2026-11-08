@@ -14,7 +14,7 @@ function takesValue(program, flag) {
   if (kind === 'fd' && flag === '--glob' || kind === 'grep' && flag === '--color') return false;
   return flag.startsWith('--') ? VALUE_FLAGS.has(flag) : (SHORT_VALUES[kind] || new Set(['-e', '-f', '-m', '-A', '-B', '-C'])).has(flag);
 }
-const uncertain = () => ({ action: 'confirm', rule: 'search-path-unknown', reason: '搜索根路径或参数无法静态确定；请明确指定有限目录。' });
+const uncertain = () => ({ action: 'block', rule: 'search-path-unknown', reason: '搜索根路径或参数无法静态确定；请明确指定有限目录。' });
 
 function rootsOf(program, args) {
   if (program === 'find') {

@@ -3,7 +3,6 @@ import { HOME, defaultProtectedPaths, resolveTarget } from './paths.mjs';
 export const DEFAULTS = {
   enabled: true, blockWholeDisk: true, interactive: true, requireBackgroundRedirect: true,
   timeout: { fast: 60, default: 120, heavy: 900, ceiling: 1800 },
-  rm: { policy: 'tiered', grantFromUserText: true },
   everything: { enabled: true, esPath: '', guiPath: '', autostart: false, maxResults: 50 }, allow: [],
 };
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -20,7 +19,7 @@ export function normalizeOptions(input = {}) {
   const protectedPaths = [...defaultProtectedPaths(home, platform), ...(Array.isArray(settings.protectedPaths) ? settings.protectedPaths : [])];
   return {
     ...merged, platform, cwd, home, projectRoot: input.projectRoot || cwd,
-    timeout, rm: { ...DEFAULTS.rm, ...object(settings.rm) },
+    timeout,
     everything: { ...DEFAULTS.everything, ...object(settings.everything) },
     explicitTimeout: input.explicitTimeout,
     realpath: typeof input.realpath === 'function' ? input.realpath : undefined,

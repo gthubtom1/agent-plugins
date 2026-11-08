@@ -16,59 +16,42 @@ function cases(rows, extra) {
   }
 }
 
-test('negative, quoted, hypothetical, mixed and excluded instructions grant nothing', () => {
-  for (const userText of ['不要删除 D:/outside', '请不要删除 D:/outside', 'do not delete D:/outside', '示例：`删除 D:/outside`', '"delete D:/outside"', 'He said delete D:/outside', 'delete D:/outside but not D:/keep', 'delete D:/outside; keep D:/keep', 'delete D:/outside\n不要删除 D:/keep', '如果需要就删除 D:/outside', '可以删除 D:/outside 吗？', 'delete all', '删除所有', 'delete D:/outside && echo ok']) {
-    assert.equal(decide('rm -rf D:/outside', { userText }).action, 'confirm', userText);
+test('outside targets block independently of user prose', () => {
+  for (const userText of ['delete D:/outside', '不要删除 D:/outside', 'delete all']) {
+    cases([['rm -rf D:/outside', 'block'], ['rm -rf D:/outside D:/keep', 'block']], { userText });
   }
-  cases([['rm -rf D:/outside D:/keep', 'confirm', { userText: 'delete D:/outside but not D:/keep' }]]);
 });
 
-test('affirmative grants are exact, single-target, platform-aware and never root grants', () => {
-  cases([
-    ['rm -rf D:/outside', 'allow', { userText: 'delete D:/outside' }],
-    ['rm -rf D:/outside', 'allow', { userText: '请删除 D:/outside' }],
-    ['rm -rf "D:/outside folder"', 'allow', { userText: 'please remove "D:/outside folder"' }],
-    ['rm -rf ../other', 'allow', { userText: '把 D:/work/other 删掉' }],
-    ['rm -rf D:/outside/child', 'confirm', { userText: 'delete D:/outside' }],
-    ['rm -rf D:/outside D:/keep', 'confirm', { userText: 'delete D:/outside' }],
-    ['rm -rf src', 'allow', { userText: '删除 src' }],
-    ['rm -rf D:/OUTSIDE', 'allow', { userText: 'delete D:/outside' }],
-    ['rm -rf /', 'block', { userText: 'delete /' }],
-    ['rm -rf C:/Windows', 'block', { userText: 'delete C:/Windows' }],
-  ]);
-  cases([['rm -rf /work/Project/src', 'confirm', { platform: 'linux', cwd: '/work/project', projectRoot: '/work/project', home: '/home/example', userText: 'delete /work/project/src' }]]);
-});
-
-test('root and home-wide globs hard block while scoped project globs confirm', () => {
+test('root and home-wide globs hard block and scoped project globs block', () => {
   cases([
     ['rm -rf /*', 'block'], ['rm -rf C:/*', 'block'], ['rm -rf C:/Users/*', 'block'],
     ['rm -rf C:/Users/exam*', 'block'], ['rm -rf ~/*', 'block'], ['rm -rf ${HOME}/*', 'block'],
     ['rm -rf C:/Windows/*', 'block'], ['rm -rf //host/share/*', 'block'],
-    ['rm -rf src/*', 'confirm'], ['rm -rf *.tmp', 'confirm'], ['rm -rf build/*', 'confirm'],
+    ['rm -rf src/*', 'block'], ['rm -rf *.tmp', 'block'], ['rm -rf build/*', 'block'],
   ], { settings: { allow: ['.*'] } });
-  cases([['rm -rf /home/*', 'block'], ['rm -rf /home/example/*', 'block'], ['rm -rf src/*', 'confirm']], { platform: 'linux', cwd: '/work/project', projectRoot: '/work/project', home: '/home/example' });
+  cases([['rm -rf /home/*', 'block'], ['rm -rf /home/example/*', 'block'], ['rm -rf src/*', 'block']], { platform: 'linux', cwd: '/work/project', projectRoot: '/work/project', home: '/home/example' });
   cases([['rm -rf vault/*', 'block']], { settings: { protectedPaths: ['D:/work/project/vault/private'] } });
   cases([['rm -rf /*', 'block']], { realpath: () => { throw new Error('unavailable'); } });
 });
 
-test('recursive source trees and global temp do not inherit automatic cleanup grants', () => {
+test('ordinary source trees use TEMP; global temp and other deletion tools block', () => {
   cases([
-    ['rm -rf src', 'confirm'], ['rm -rf docs', 'confirm'], ['rm -rf test', 'confirm'],
-    ['rmdir src', 'confirm'], ['del src', 'confirm'], ['Remove-Item -Recurse src', 'confirm'],
-    ['rm -R build', 'allow'],
-    ['rm -rf /tmp/unrelated', 'confirm'], ['rm -rf C:/Users/example/AppData/Local/Temp/unrelated', 'confirm'],
-    ['rm -rf build', 'allow'], ['rm -rf .cache/task', 'allow'], ['rm -rf nested/node_modules', 'confirm'],
-    ['rm -rf tmp', 'confirm'], ['rm -rf temp', 'confirm'], ['rm -rf .tmp', 'confirm'],
-    ['rm -rf src/build', 'confirm'],
-    ['rm notes.txt', 'allow'], ['rm -f -- notes.txt', 'allow'], ['unlink notes.txt', 'allow'],
-    ['rm -rf .git/build', 'confirm'], ['rm -rf *', 'confirm'], ['rm -rf "$TARGET"', 'confirm'],
+    ['rm -rf src', 'trash'], ['rm -rf docs', 'trash'], ['rm -rf test', 'trash'],
+    ['rmdir src', 'block'], ['del src', 'block'], ['Remove-Item -Recurse src', 'block'],
+    ['rm -R build', 'trash'],
+    ['rm -rf /tmp/unrelated', 'block'], ['rm -rf C:/Users/example/AppData/Local/Temp/unrelated', 'block'],
+    ['rm -rf build', 'trash'], ['rm -rf .cache/task', 'trash'], ['rm -rf nested/node_modules', 'trash'],
+    ['rm -rf tmp', 'trash'], ['rm -rf temp', 'block'], ['rm -rf .tmp', 'trash'],
+    ['rm -rf src/build', 'trash'],
+    ['rm notes.txt', 'trash'], ['rm -f -- notes.txt', 'trash'], ['unlink notes.txt', 'block'],
+    ['rm -rf .git/build', 'block'], ['rm -rf *', 'block'], ['rm -rf "$TARGET"', 'block'],
   ]);
 });
 
 test('config allow patterns never override roots, protected descendants or uncertainty', () => {
   cases([
     ['rm -rf /', 'block'], ['rm -rf C:/Windows', 'block'], ['rm -rf //host/share', 'block'],
-    ['rm -rf src', 'confirm'], ['find . / -name x', 'block'], ['worker &', 'block'],
+    ['rm -rf src', 'trash'], ['find . / -name x', 'block'], ['worker &', 'block'],
     ['ls -la', 'allow'],
   ], { settings: { allow: ['.*'] } });
   cases([['rm -rf vault', 'block'], ['rm vault', 'block'], ['rm -rf vault/private/file', 'block']], { settings: { allow: ['.*'], protectedPaths: ['D:/work/project/vault/private'] } });
@@ -79,14 +62,14 @@ test('cd and env cwd changes cannot hide relative destructive paths or root sear
   cases([
     ['cd / && rm -rf etc', 'block'], ['cd /; rm -rf etc', 'block'],
     ['cd C:/ && rm -rf Windows', 'block'], ['cd / && find . -name x', 'block'],
-    ['cd / && rg --files', 'block'], ['cd "$DEST" && rm -rf build', 'confirm'],
+    ['cd / && rg --files', 'block'], ['cd "$DEST" && rm -rf build', 'block'],
     ['env -C / rm -rf etc', 'block'], ['env --chdir=C:/ rm -rf Windows', 'block'],
-    ['env -u MODE -C D:/outside rm -rf build', 'confirm'],
-    ['cd work && rm -rf node_modules', 'confirm'], ['cd work && rm notes.txt', 'allow'],
-    ['cd / | echo ok; rm notes.txt', 'allow'],
-    ['cd / >cdlog 2>&1 && worker >log 2>&1 & rm notes.txt', 'allow'],
+    ['env -u MODE -C D:/outside rm -rf build', 'block'],
+    ['cd work && rm -rf node_modules', 'block'], ['cd work && rm notes.txt', 'block'],
+    ['cd / | echo ok; rm notes.txt', 'block'],
+    ['cd / >cdlog 2>&1 && worker >log 2>&1 & rm notes.txt', 'block'],
     ['bash -c "cd /; rm -rf etc"', 'block'],
-    ['bash -c "rm -rf D:/outside"', 'allow', { userText: 'delete D:/outside' }],
+    ['bash -c "rm -rf D:/outside"', 'block', { userText: 'delete D:/outside' }],
   ]);
 });
 
@@ -113,7 +96,7 @@ test('multiple roots, implicit roots and pattern-option arities in searches', ()
     ['find -name x', 'block', { cwd: 'D:/', projectRoot: 'D:/' }],
     ['grep -r -e token /', 'block'], ['rg -e token /', 'block'], ['rg -f patterns.txt /', 'block'],
     ['rg --glob "*.mjs" token /', 'block'], ['rg --files --hidden /', 'block'],
-    ['find "$ROOT" -name x', 'confirm'], ['find -files0-from roots.txt -name x', 'confirm'],
+    ['find "$ROOT" -name x', 'block'], ['find -files0-from roots.txt -name x', 'block'],
     ['find /d -name x', 'allow', { platform: 'linux', cwd: '/work/project', projectRoot: '/work/project', home: '/home/example' }],
     ['find . src -name "*.mjs"', 'allow'], ['rg -e token -g "*.mjs" src', 'allow'],
     ['rg --files src', 'allow'], ['grep -r -f patterns.txt src', 'allow'],
@@ -127,11 +110,11 @@ test('newlines and comments execute following commands while heredoc data does n
     ["cat <<'EOF'\ntext\nEOF\nrm -rf /", 'block'],
     ["cat <<'EOF'\nrm -rf /\nEOF", 'allow'],
     ["cat <<'EOF'\n$(rm -rf /) &\nEOF", 'allow'],
-    ['cat <<EOF\n$(rm -rf /)\nEOF', 'confirm'],
-    ["cat <<'EOF'\nunclosed", 'confirm'],
-    ['echo "$(rm -rf /)"', 'confirm'],
+    ['cat <<EOF\n$(rm -rf /)\nEOF', 'block'],
+    ["cat <<'EOF'\nunclosed", 'block'],
+    ['echo "$(rm -rf /)"', 'block'],
     ['if true; then rm -rf /; fi', 'block'],
-    ['for x in src; do echo "$x"; done', 'confirm'],
+    ['for x in src; do echo "$x"; done', 'allow'],
   ]);
   assert.equal(parseShell("cat <<'EOF'\na & b\nEOF").segments.length, 1);
 });
@@ -160,32 +143,32 @@ test('pipeline input is local to the adjacent stage, and input redirect/heredoc 
   ]);
 });
 
-test('inline deletion variables confirm, literals tier correctly, quoted documentation is data', () => {
+test('inline deletion variables and literals block, quoted documentation is data', () => {
   cases([
-    ["python -c 'shutil.rmtree(TARGET)'", 'confirm'], ["node -e 'fs.rmSync(target,{recursive:true})'", 'confirm'],
-    ["python <<< 'shutil.rmtree(TARGET)'", 'confirm'], ["bash <<< 'rm -rf /'", 'block'],
-    ["python -u <<'PY'\nshutil.rmtree(TARGET)\nPY", 'confirm'],
-    ["node --input-type=module <<< 'fs.rmSync(TARGET)'", 'confirm'],
+    ["python -c 'shutil.rmtree(TARGET)'", 'block'], ["node -e 'fs.rmSync(target,{recursive:true})'", 'block'],
+    ["python <<< 'shutil.rmtree(TARGET)'", 'block'], ["bash <<< 'rm -rf /'", 'block'],
+    ["python -u <<'PY'\nshutil.rmtree(TARGET)\nPY", 'block'],
+    ["node --input-type=module <<< 'fs.rmSync(TARGET)'", 'block'],
     ["bash script.sh <<'EOF'\nrm -rf /\nEOF", 'allow'],
-    ["node -e \"require('fs').rm(target,{recursive:true})\"", 'confirm'],
+    ["node -e \"require('fs').rm(target,{recursive:true})\"", 'block'],
     ["node -e \"require('fs').rm('/',{recursive:true})\"", 'block'],
-    ["python - <<'PY'\nshutil.rmtree(TARGET)\nPY", 'confirm'],
+    ["python - <<'PY'\nshutil.rmtree(TARGET)\nPY", 'block'],
     ["python -c \"shutil.rmtree('/')\"", 'block'], ["node -e \"require('fs').rmSync('C:/Windows',{recursive:true})\"", 'block'],
-    ["python -c \"shutil.rmtree('src')\"", 'confirm'], ["python -c \"shutil.rmtree('build')\"", 'allow'],
-    ["node -e \"fs.unlinkSync('notes.txt')\"", 'allow'],
+    ["python -c \"shutil.rmtree('src')\"", 'block'], ["python -c \"shutil.rmtree('build')\"", 'block'],
+    ["node -e \"fs.unlinkSync('notes.txt')\"", 'block'],
     ["python -c \"open('README.md','w').write('shutil.rmtree(TARGET)')\"", 'allow'],
     ["python -c \"# shutil.rmtree('/')\nprint(1)\"", 'allow'],
     ["node -e \"const docs = 'fs.rmSync(target)'; console.log(docs)\"", 'allow'],
-    ["python -c \"shutil.rmtree('build' + suffix)\"", 'confirm'],
+    ["python -c \"shutil.rmtree('build' + suffix)\"", 'block'],
     ["python -c \"shutil.rmtree('/' + suffix)\"", 'block'],
     ["node -e \"fs['rmSync']('/',{recursive:true})\"", 'block'],
     ["node -e \"fs.rmSync(target || '/', {recursive:true})\"", 'block'],
-    ["python -c \"shutil.rmtree(f'build/{name}')\"", 'confirm'],
-    ["node -e \"fs['rmSync'](target)\"", 'confirm'],
-    ["node -e \"fs[method](target)\"", 'confirm'],
-    ["node -e \"const {rm: wipe} = require('fs'); fs.unlinkSync('notes.txt'); wipe(target)\"", 'confirm'],
-    ["python -c \"from shutil import rmtree as wipe; wipe(TARGET)\"", 'confirm'],
-    ["find . -exec rm -rf / \\;", 'block'], ['echo paths | xargs rm', 'confirm'],
+    ["python -c \"shutil.rmtree(f'build/{name}')\"", 'block'],
+    ["node -e \"fs['rmSync'](target)\"", 'block'],
+    ["node -e \"fs[method](target)\"", 'block'],
+    ["node -e \"const {rm: wipe} = require('fs'); fs.unlinkSync('notes.txt'); wipe(target)\"", 'block'],
+    ["python -c \"from shutil import rmtree as wipe; wipe(TARGET)\"", 'block'],
+    ["find . -exec rm -rf / \\;", 'block'], ['echo paths | xargs rm', 'block'],
     ['echo paths | xargs rm -rf /', 'block'],
   ]);
 });
@@ -201,23 +184,23 @@ test('POSIX case sensitivity, UNC structure, root containment and Windows suffix
   cases([
     ['rm -rf "C:/Windows. /System32"', 'block'], ['rm -rf "D:/work/project/.. /.. /.. /"', 'block'],
     ["rm -rf '\\\\server\\share'", 'block'], ['rm -rf //server/share', 'block'],
-    ['rm -rf "D:relative"', 'confirm'], ['rm -rf "\\\\?\\C:\\Windows"', 'block'],
+    ['rm -rf "D:relative"', 'block'], ['rm -rf "\\\\?\\C:\\Windows"', 'block'],
     ['rm -rf "\\Windows"', 'block'],
   ]);
 });
 
-test('realpath failure, protected referents and generated links never become grants', () => {
+test('realpath failure and protected or external referents block', () => {
   cases([['rm -rf build', 'block']], { realpath: (p) => p.endsWith('/build') ? 'C:/Windows' : p });
-  cases([['rm -rf build', 'confirm']], { realpath: (p) => p.endsWith('/build') ? 'D:/outside/build' : p });
-  cases([['rm notes.txt', 'confirm']], { realpath: () => { throw new Error('unavailable'); } });
+  cases([['rm -rf build', 'block']], { realpath: (p) => p.endsWith('/build') ? 'D:/outside/build' : p });
+  cases([['rm notes.txt', 'block']], { realpath: () => { throw new Error('unavailable'); } });
   cases([['rm -rf /', 'block'], ['rm -rf C:/Windows', 'block'], ['rm -rf C:/Users/example/.ssh', 'block']], { realpath: () => { throw new Error('unavailable'); } });
 });
 
 test('independent review regressions: argv expansion, CDPATH, PS arrays and option arities', () => {
   const linux = { platform: 'linux', cwd: '/work/app', projectRoot: '/work/app', home: '/home/alice' };
-  cases([['/bin/r[m] -rf /home/alice/.ssh', 'confirm'], ['CDPATH=/home/alice cd .ssh; rm -f id_ed25519', 'confirm']], linux);
+  cases([['/bin/r[m] -rf /home/alice/.ssh', 'block'], ['CDPATH=/home/alice cd .ssh; rm -f id_ed25519', 'block']], linux);
   cases([['Remove-Item -Recurse ./dist/a,/Users/Alice/.ssh', 'block']], { cwd: 'C:/work/app', projectRoot: 'C:/work/app', home: 'C:/Users/Alice' });
-  cases([['git clean -fd -e -n', 'confirm'], ['git clean -fen', 'confirm'], ['git clean -- -n', 'confirm'], ['git clean -n -e pattern', 'allow']]);
+  cases([['git clean -fd -e -n', 'block'], ['git clean -fen', 'block'], ['git clean -- -n', 'block'], ['git clean -n -e pattern', 'allow']]);
   cases([['rg -L needle /', 'block'], ['rg -I needle /', 'block'], ['grep -rE needle /', 'block'], ['rg -L needle src', 'allow'], ['fd --glob needle /', 'block'], ['grep -r --color needle /', 'block']]);
 });
 
@@ -230,7 +213,7 @@ test('Every enabled/disabled/config-error decision has a finite bounded timeout'
   ]);
   assert.equal(decide('ls', { settings: { enabled: false }, explicitTimeout: 99999 }).timeout, 1800);
   const broken = { get settings() { throw new Error('configuration read failed'); } };
-  assert.deepEqual(evaluate('ls', broken), { action: 'block', timeout: 120, reason: '策略发生内部或配置错误，未完成评估，已拒绝执行。', rule: 'policy-error', tier: 'T3' });
+  assert.deepEqual(evaluate('ls', broken), { action: 'block', timeout: 120, reason: '策略发生内部或配置错误，未完成评估，已拒绝执行。', rule: 'policy-error' });
   assert.equal(decide('ls', { settings: { protectedPaths: ['$TARGET'] } }).rule, 'policy-error');
 });
 
