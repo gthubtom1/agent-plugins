@@ -17,6 +17,7 @@
     "test": "node --experimental-strip-types --test persona.test.ts"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*"
   }
 }

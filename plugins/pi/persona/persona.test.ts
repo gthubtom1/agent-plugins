@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach } from "node:test";
@@ -81,6 +81,8 @@ function fakeContext(overrides = {}) {
     },
     ui: {
       select: async () => answers.shift(),
+      input: async () => overrides.input,
+      editor: async () => overrides.editor,
       notify: (message, type) => notes.push({ message, type }),
       setStatus: (key, text) => statuses.push({ key, text }),
     },
@@ -118,7 +120,7 @@ test("choosing a persona in the dialog records it in the conversation and in the
   const { api, commands, appended } = fakePi();
   personaExtension(api);
 
-  const ctx = fakeContext({ select: ["破甲v2"] });
+  const ctx = fakeContext({ select: ["○ 破甲v2.md"] });
   await commands.get("persona").handler("", ctx);
 
   assert.deepEqual(appended, [{ customType: "pi-seep-ext:persona", data: { personaId: "破甲v2" } }]);
@@ -137,19 +139,72 @@ test("Esc in the picker changes nothing at all", async () => {
   assert.deepEqual(ctx.statuses, []);
 });
 
-test("the picker only offers persona files and the off option", async () => {
+test("the picker offers persona files, off and create", async () => {
   makeAgentDir({ 严师: "A" }, { settings: { defaultId: "严师", mode: "every-turn", showBadge: true } });
   const { api, commands, appended } = fakePi();
   personaExtension(api);
 
   const ctx = fakeContext();
   ctx.ui.select = async (_title, options) => {
-    assert.deepEqual(options, ["无人设", "● 严师"]);
-    return "无人设";
+    assert.deepEqual(options, ["○ 无人设", "● 严师.md", "＋ 新建人设…", "⚙ 注入模式（当前 every-turn）"]);
+    return "○ 无人设";
   };
   await commands.get("persona").handler("", ctx);
   assert.deepEqual(appended, [{ customType: "pi-seep-ext:persona", data: { personaId: null } }]);
   assert.equal(ctx.statuses.at(-1).text, "🧑‍🎤 人设：无");
+});
+
+test("the first session creates the persona directory without creating settings", () => {
+  const dir = fixtureDir();
+  process.env.PI_CODING_AGENT_DIR = dir;
+  const { api, handlers } = fakePi();
+  personaExtension(api);
+  handlers.get("session_start")[0]({}, fakeContext());
+  assert.ok(existsSync(join(dir, "personas")));
+  assert.equal(existsSync(join(dir, "personas.json")), false);
+});
+
+test("create from the picker writes a discoverable file without changing the selection", async () => {
+  const dir = makeAgentDir({});
+  const { api, commands, handlers, appended } = fakePi();
+  personaExtension(api);
+  const create = fakeContext({ select: ["＋ 新建人设…"], input: "技术导师", editor: "Ask one question at a time." });
+  await commands.get("persona").handler("", create);
+  assert.equal(readPersonaText(dir, "技术导师"), "Ask one question at a time.");
+  assert.deepEqual(appended, []);
+  const select = fakeContext({ select: ["○ 技术导师.md"] });
+  await commands.get("persona").handler("", select);
+  const event = { systemPromptOptions: { sections: { unrelated: "keep" } } };
+  handlers.get("before_agent_start")[0](event, select);
+  assert.deepEqual(event.systemPromptOptions.sections, { personality: "Ask one question at a time.", unrelated: "keep" });
+});
+
+test("creation cancellation, empty input and duplicate names never overwrite a card", async () => {
+  const dir = makeAgentDir({ 导师: "original" });
+  const { api, commands, appended } = fakePi();
+  personaExtension(api);
+  const handler = commands.get("persona").handler;
+  const cancelled = fakeContext({ input: "取消" });
+  await handler("new", cancelled);
+  const empty = fakeContext({ input: "空白", editor: " " });
+  await handler("new", empty);
+  const duplicate = fakeContext({ input: "导师", editor: "new" });
+  await handler("new", duplicate);
+  assert.equal(readPersonaText(dir, "导师"), "original");
+  assert.deepEqual(listPersonas(dir).map(p => p.id), ["导师"]);
+  assert.equal(empty.notes.at(-1).type, "error");
+  assert.match(duplicate.notes.at(-1).message, /未覆盖/);
+  assert.deepEqual(appended, []);
+});
+
+test("selecting an empty persona warns without overwriting the previous selection", async () => {
+  makeAgentDir({ 导师: "original", 空白: " " });
+  const { api, commands, appended } = fakePi();
+  personaExtension(api);
+  const ctx = fakeContext({ entries: [personaEntry("导师")] });
+  await commands.get("persona").handler("空白", ctx);
+  assert.deepEqual(appended, []);
+  assert.match(ctx.notes.at(-1).message, /当前人设未更改/);
 });
 
 test("/persona off clears the persona even when the file still exists", async () => {
@@ -373,15 +428,15 @@ test("ids that cannot survive a path join are rejected", () => {
   }
 });
 
-test("settings only keep the optional default persona", () => {
-  assert.deepEqual(normalizeSettings(undefined), { defaultId: null });
-  assert.deepEqual(normalizeSettings({ defaultId: "a", mode: "every-turn", showBadge: true }), { defaultId: "a" });
-  assert.deepEqual(normalizeSettings({ defaultId: "../x" }), { defaultId: null });
+test("settings keep the default persona and injection options", () => {
+  assert.deepEqual(normalizeSettings(undefined), { defaultId: null, mode: "cached", showBadge: false });
+  assert.deepEqual(normalizeSettings({ defaultId: "a", mode: "every-turn", showBadge: true }), { defaultId: "a", mode: "every-turn", showBadge: true });
+  assert.deepEqual(normalizeSettings({ defaultId: "../x" }), { defaultId: null, mode: "cached", showBadge: false });
 
   const dir = agentDirWith({ "a.md": "A" });
-  assert.deepEqual(readSettings(dir), { defaultId: null });
+  assert.deepEqual(readSettings(dir), { defaultId: null, mode: "cached", showBadge: false });
   writeFileSync(join(dir, "personas.json"), JSON.stringify({ defaultId: "a", mode: "every-turn" }), "utf8");
-  assert.deepEqual(readSettings(dir), { defaultId: "a" });
+  assert.deepEqual(readSettings(dir), { defaultId: "a", mode: "every-turn", showBadge: false });
 });
 
 // Prompt section deltas

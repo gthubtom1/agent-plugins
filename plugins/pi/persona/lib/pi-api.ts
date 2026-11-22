@@ -14,8 +14,11 @@ export interface ContextMessage {
 export interface BaseContext {
   ui: {
     select(title: string, options: string[]): Promise<string | undefined>;
+    input(title: string, placeholder?: string): Promise<string | undefined>;
+    editor(title: string, prefill?: string): Promise<string | undefined>;
     notify(message: string, type?: "info" | "warning" | "error"): void;
     setStatus(key: string, text: string | undefined): void;
+    setWidget?(key: string, content: string[] | undefined): void;
   };
   sessionManager: {
     getBranch(): SessionEntryLike[];
@@ -30,7 +33,8 @@ export interface ExtensionApi {
   on(event: "before_agent_start", handler: (event: {
     systemPromptOptions?: { sections?: Record<string, string | null> };
   }, ctx: BaseContext) => void): void;
-  on(event: "context_with_system", handler: (event: { messages: ContextMessage[] }, ctx: BaseContext) => void): void;
+  on(event: "context_with_system", handler: (event: { messages: ContextMessage[] }, ctx: BaseContext) =>
+    void | Promise<{ messages: ContextMessage[] } | undefined>): void;
   registerCommand(name: string, options: {
     description?: string;
     handler: (args: string, ctx: CommandContext) => Promise<void>;
