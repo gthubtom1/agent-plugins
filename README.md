@@ -1,105 +1,46 @@
-# Agent Plugins Hub（多智能体插件库）
+# Agent Plugins Hub
 
-自制插件的**源码仓库**。每个插件自带 `README.md`（人看的说明）和安装方法；
-智能体读完文档就能装，**不需要任何安装脚本**。
+这个仓库保存我自己维护的智能体插件源码。Pi 插件按独立目录管理，每个插件都可以单独安装，也可以通过根目录的 `package.json` 一次加载全部入口。
 
-> **给智能体的一句指令**：把这个仓库里需要的插件装上，装之前先把要装的东西编号列给我确认。
+## Pi 插件
 
----
-
-## 📦 插件清单
-
-| 宿主 | 插件 | 说明 | 交互 | 状态 | 文档 |
-|---|---|---|---|---|---|
-| **Pi** | `pi-seep-ext · persona` | **按对话的人设**：人设 = `personas/*.md`（文件名即名字），随时切换/关闭，`cached`（省 token）/ `every-turn` 两种注入；切「无人设」真的删掉系统提示词里的身份 | 状态栏按钮 + `/persona` | 🟢 生产就绪 | [查看](plugins/pi/pi-seep-ext/README.md) |
-| **Pi** | `pi-seep-ext · rewind` | **回退**：回到某条消息之前 / 只删最后一条回复，原文放回输入框（官方 `navigateTree`，不碰会话文件）；**状态栏「⟲ 回退」点一下就退** | 状态栏按钮 + `/rewind` `/undo-reply` | 🟢 生产就绪 | [查看](plugins/pi/pi-seep-ext/README.md) |
-| **Pi** | `pi-seep-ext · remote` | **手机连上**：局域网/Tailscale 地址、终端二维码、运行期生成密码、5 行自检；不改 pi-web | `/remote` | 🟢 生产就绪 | [查看](plugins/pi/pi-seep-ext/README.md) |
-| **Pi** | `cmd-guard` | **命令执行守卫**：自动补 timeout / 拦截 GUI 二进制 / 卡死状态栏 | 状态栏 + `/guard` `/stall` | 🟢 生产就绪 | [查看](plugins/pi/cmd-guard/README.md) |
-| **Pi** | `retry-level` | **重试档位**：菜单切档 off/3/5/10/15/30/无限，状态栏常显且可点 | `/retry` | 🟢 生产就绪 | [查看](plugins/pi/retry-level/README.md) |
-| **Pi** | `shell-guard` | 命令护栏：超时分档、拒绝整盘 find/grep、删除分档（用户点名的可删，盘根/系统目录拒绝）、后台未重定向检测；另有 `search_files` 走 Everything 毫秒级查文件名 | 自动生效 + `search_files` | 0.3.0，审查中 | [查看](plugins/pi/shell-guard/README.md) |
-| **DSH** | `dsh-infinite-retry` | 仿 PI-Desktop 无限重试插件：遇网络波动/429 持续重试直到成功 | 自带设置页 Switch | 🟢 生产就绪 | [查看](plugins/dsh/dsh-infinite-retry/README.md) |
-| **PI-Desktop** | *(规划中)* | 面向 PI-Desktop 的原生 `.piplug` 扩展 | Work Panel / Sidecar | 🟡 建设中 | [分类主页](plugins/pi-desktop/README.md) |
-| **Claude Code** | *(规划中)* | 面向 Claude Code 的 MCP 工具与 Hook 增强 | 终端 CLI / Tools | 🟡 建设中 | [分类主页](plugins/claude-code/README.md) |
-| **Codex** | *(规划中)* | 面向 Codex 的本地自动化与环境桥接 | CLI / Runtime | 🟡 建设中 | [分类主页](plugins/codex/README.md) |
-| **OpenCode** | *(规划中)* | 面向 OpenCode 的前端主题与工作流插件 | Webview / Extensions | 🟡 建设中 | [分类主页](plugins/opencode/README.md) |
-
-### Seep 部署用户特别说明
-
-Seep 中二开过的自有扩展已同步回来。通用插件保持独立可装；完整 Seep 适配代码另存为
-[seep-workbench](plugins/pi/seep-workbench/README.md)，**不加入根安装清单**。
-
-- 已经通过 Seep 安装器部署的人，不要再把本仓库根包整包装一遍；人设、守卫、重试、提示词会重复加载。
-- 新设备部署 Seep 仍按 [Seep 主仓库](https://github.com/gthubtom1/SRL) 的安装流程；本仓库不是技能、KB、工具和 MCP 的替代安装器。
-- 本次同步范围、来源和复验见 [同步说明](docs/SEEP-SYNC-2026-11-02.md)。第三方下载内容未更新。
-
-**第三方 pi 插件**（不在本仓库，用安装命令直接装，**永远是最新版**）：
-
-| 插件 | 装法 | 说明 |
+| 插件 | 功能 | 入口 |
 |---|---|---|
-| `@hk_net/pi-advisor` | `pi install npm:@hk_net/pi-advisor` | **顾问**：一轮结束后让第二个模型复查并投递意见，可手动 `/advise`。**注意**：热门的 `@bacnh85/pi-advisor` 只在终端工作（`ctx.mode !== "tui"` 直接跳过），pi-web 里用这个 |
+| [`persona`](plugins/pi/persona/README.md) | 按当前对话选择 Markdown 人设 | `/persona` |
+| [`rewind`](plugins/pi/rewind/README.md) | 回退到消息之前，或撤销最后一条纯文本回复 | `/rewind`、`/undo-reply` |
+| [`remote`](plugins/pi/remote/README.md) | 查看局域网和 Tailscale 连接信息，管理 pi-web 远程配置 | `/remote` |
+| [`cmd-guard`](plugins/pi/cmd-guard/README.md) | 命令超时兜底、GUI 拦截、长时间运行状态 | `/guard`、`/stall` |
+| [`retry-level`](plugins/pi/retry-level/README.md) | 调整模型请求重试档位 | `/retry` |
 
----
+三个原先放在 `pi-seep-ext` 中的扩展现在已经拆成三个包。它们共享思路，但安装和加载互相独立。
+
+已移除的旧实验插件 `shell-guard`、`seep-workbench` 和 `pi-advisor` 不再属于本仓库。
 
 ## 安装
 
-### 本仓库的自制插件（一条命令）
+克隆仓库后，只安装需要的插件：
 
 ```bash
-pi install git:github.com/gthubtom1/agent-plugins@main
+pi install ./plugins/pi/persona
+pi install ./plugins/pi/rewind
+pi install ./plugins/pi/remote
+pi install ./plugins/pi/cmd-guard
+pi install ./plugins/pi/retry-level
 ```
 
-根 `package.json` 的 `pi.extensions` 是安装清单；pi 会把仓库 checkout 下来按清单加载，
-所以**更新 = `pi update`**，不需要重新拷贝文件。
+只执行你需要的那一行。想一次装齐，可在仓库根目录运行 `pi install .`，或直接运行 `pi install git:github.com/gthubtom1/agent-plugins@main`。不要同时安装根包和同名独立包。
 
-只装其中一包：
+安装后重新打开 Pi 会话。每个插件目录的 README 记录了插件用途、命令和单独安装方法。
+
+## 其他宿主
+
+`plugins/dsh`、`plugins/claude-code`、`plugins/codex`、`plugins/opencode` 和 `plugins/pi-desktop` 保存其他宿主的源码或占位说明。`skills/` 保存技能备份。
+
+## 开发检查
 
 ```bash
-pi install <本地路径>/plugins/pi/pi-seep-ext
+npm test
+npm run test:sdk -- <已安装的-pi-coding-agent-包目录>
 ```
 
-### 项目组合安装
-
-Reverse workflow 只通过安装器注册 reverse skill、官方工具和可选的 shell-guard；项目状态仍以原始 scope、Evidence、Spec Kit 和项目文件为准。
-
-换电脑使用 [reverse-workflow-installer](https://github.com/gthubtom1/reverse-workflow-installer) 的 Pi 安装，它会冻结所选插件发布 tag 的确切 commit，只注册对应子目录，并保留安装与恢复回执。
-
-### 第三方插件
-
-用 npm 装，不锁版本、跟着上游更新：
-
-```bash
-pi install npm:@hk_net/pi-advisor
-```
-
----
-
-## 仓库结构
-
-```text
-agent-plugins/
-├── plugins/                     # 插件源码，一个宿主一个目录
-│   ├── pi/                      # Pi Coding Agent
-│   │   ├── pi-seep-ext/         #   人设 / 回退 / 远程（包形式：extensions/ + lib/ + test/）
-│   │   ├── cmd-guard/           #   单文件扩展
-│   │   ├── retry-level/
-│   ├── dsh/
-│   ├── claude-code/ codex/ opencode/ pi-desktop/   # 占位（只有 README）
-│   └── ...
-├── skills/                      # 现役技能备份（3 个），拷回 ~/.agents/skills/
-├── docs/
-│   ├── ARCHITECTURE.md          # 分层设计说明
-│   └── CONTRIBUTING.md          # 新插件接入流程
-└── package.json                 # pi.extensions = 安装清单
-```
-
-**没有的东西（刻意不放）**：安装脚本、环境快照、MCP 清单、机器部署哈希基线。
-原因：这些内容里几乎全是"这台机器"的路径、端口和令牌，换机后不可复用；
-插件本身是源码，智能体读文档 + 一条 `pi install` 就够了。Seep 专用包的 `SOURCE.json` 只记录公开源码来源与哈希，不是本机环境快照。
-
----
-
-## 约定
-
-- 单文件插件：源码 + `package.json`（`main` 指向 `.ts`）+ `README.md` + `LICENSE`。
-- 多文件/有依赖的插件：做成**包形式**（`package.json` 里写 `pi.extensions`），走 `pi install`。
-- 插件里不写死机器路径或用户名；需要外部程序时，运行时探测并给出安装提示。
+插件代码在宿主进程内运行，安装前请检查来源和权限。提交前先在本地验证，再提交 Git 记录。

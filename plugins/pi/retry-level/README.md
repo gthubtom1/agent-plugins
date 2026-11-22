@@ -43,8 +43,8 @@ Pi 内核的默认重试上限是 **3 次**。遇到上游网关抖动（`502` /
 ## 🚀 安装
 
 ```bash
-# 方式一：从本仓库包装（连同其他自制插件一起）
-pi install git:github.com/gthubtom1/agent-plugins@main
+# 方式一：只安装本插件（先克隆仓库）
+pi install "/path/to/agent-plugins/plugins/pi/retry-level"
 
 # 方式二：手工放文件
 cp retry-level.ts ~/.pi/agent/extensions/

@@ -1,6 +1,6 @@
 {
   "name": "agent-plugins",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "多智能体插件库：面向 Pi Coding Agent / Claude Code / Codex / dsh / OpenCode 的插件精选",
   "keywords": [
     "pi-package",
@@ -13,9 +13,9 @@
     "extensions": [
       "./plugins/pi/cmd-guard/cmd-guard.ts",
       "./plugins/pi/retry-level/retry-level.ts",
-      "./plugins/pi/pi-seep-ext/extensions/persona.ts",
-      "./plugins/pi/pi-seep-ext/extensions/rewind.ts",
-      "./plugins/pi/pi-seep-ext/extensions/remote.ts"
+      "./plugins/pi/persona/persona.ts",
+      "./plugins/pi/rewind/rewind.ts",
+      "./plugins/pi/remote/remote.ts"
     ]
   },
   "repository": {
@@ -25,8 +25,10 @@
   "author": "Toti",
   "license": "MIT",
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-ai": "*"
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "optionalDependencies": {
+    "qrcode-generator": "^2.0.4"
   },
   "scripts": {
     "test": "node scripts/test.mjs",

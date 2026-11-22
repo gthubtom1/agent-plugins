@@ -54,9 +54,13 @@ interface GuardConfig {
 	heavyTimeout: number;
 	/** 递归大目录扫描的最低 timeout */
 	scanTimeout: number;
-	/** 超过它算「疑似卡死」，底栏变红 */
+	/** 传入 timeout 的硬上限，避免毫秒误传或无限等待 */
+	maxTimeout: number;
+	/** true = 拦截会等待终端交互的编辑器、监视器和选择器 */
+	blockInteractive: boolean;
+	/** 超过它标记为长时运行（不是卡死判定） */
 	stallSeconds: number;
-	/** 超过它没有新输出，底栏变黄（还在跑，可能只是慢） */
+	/** 超过它没有输出更新，底栏显示静默标记 */
 	noOutputStallSeconds: number;
 	/** false = 只记账不阻断（出问题时先观察，不打断） */
 	enforce: boolean;
@@ -235,8 +239,10 @@ const DEFAULTS: GuardConfig = {
 	analysisTimeout: 120,
 	heavyTimeout: 600,
 	scanTimeout: 180,
+	maxTimeout: 1800,
 	stallSeconds: 240,
 	noOutputStallSeconds: 90,
+	blockInteractive: true,
 	enforce: true,
 	blockGui: true,
 	blockRootScan: true,
@@ -457,6 +463,11 @@ function loadConfig(force = false): void {
 	}
 	if (!Array.isArray(config.allow)) config.allow = [];
 	if (!Array.isArray(config.toolChainPaths)) config.toolChainPaths = [];
+	for (const key of ["defaultTimeout", "probeTimeout", "analysisTimeout", "heavyTimeout", "scanTimeout", "maxTimeout", "stallSeconds", "noOutputStallSeconds"] as const) {
+		const value = config[key];
+		if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) config[key] = DEFAULTS[key];
+	}
+	config.maxTimeout = Math.min(config.maxTimeout, 2_147_483.647);
 	// denyRules：rules.json 里给了就「在内置表基础上追加」，而不是整体替换 ——
 	// 否则用户写一条自己的规则就把网络禁手全关了。（DEFAULTS.denyRules 必须是空数组，
 	// 否则这里会把内置表当「追加项」再拼一遍。）
@@ -532,19 +543,16 @@ function invokedNames(cmd: string): string[] {
 	const out: string[] = [];
 	for (const rawSeg of cmd.split(SEG_SPLIT)) {
 		let seg = rawSeg.replace(/^\s*[({\[]+/, "");
-		// 剥掉前置包装，最多剥 5 层（env A=1 nohup sudo start /b X ...）
 		for (let i = 0; i < 5; i++) {
 			const before = seg;
 			seg = seg.replace(
-				/^\s*(?:&\s*|call\s+|nohup\s+|sudo\s+|doas\s+|time\s+|start(?:\s+\/[bB])?\s+|Start-Process\s+(?:-FilePath\s+)?|Invoke-Item\s+|ii\s+)/i,
+				/^\s*(?:&\s*|call\s+|nohup\s+|sudo\s+|doas\s+|command\s+|exec\s+|time\s+|start(?:\s+\/[bB])?\s+|Start-Process\s+(?:-FilePath\s+)?|Invoke-Item\s+|ii\s+)/i,
 				"",
 			);
 			seg = seg.replace(/^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, "");
 			if (seg === before) break;
 		}
-		seg = seg.trim();
-		if (!seg) continue;
-		const m = seg.match(/^["']?([^"'&\s|;]+)["']?/);
+		const m = seg.trim().match(/^["']?([^"'&\s|;]+)["']?/);
 		if (!m) continue;
 		const base = (m[1].split(/[\\/]/).pop() || "").toLowerCase();
 		if (base) out.push(base);
@@ -567,6 +575,29 @@ function findGui(cmd: string): [string, string] | null {
 		if (!hit) continue;
 		if (hit[1] === null) continue; // 明确标记为 headless，不拦
 		return [hit[0], hit[1]];
+	}
+	return null;
+}
+
+/** Only catch obvious standalone commands; everything else gets the timeout. */
+function findInteractive(cmd: string): { name: string; hint: string } | null {
+	const line = cmd.trim();
+	if (/[;&|\n<>]|\$\(|\x60/.test(line)) return null;
+	const [word, ...args] = line.split(/\s+/);
+	const name = word.toLowerCase().replace(/\.exe$/, "");
+	if (["--help", "--version", "-h"].includes(args[0])) return null;
+	if (name === "watch") return { name, hint: "改为执行一次，或使用可查看日志、可停止的后台任务。" };
+	if (["vi", "vim", "nvim", "nano"].includes(name) && !args.some(arg => ["-e", "-E", "-s", "-es", "-Es", "--headless"].includes(arg))) {
+		return { name, hint: "使用 Pi 的 read/edit 工具，或编辑器的批处理模式。" };
+	}
+	if (name === "top" && !args.includes("-l") && !(args.includes("-b") && args.includes("-n"))) {
+		return { name, hint: "改用一次性进程快照，例如 top -b -n 1。" };
+	}
+	if (name === "fzf" && !args.some(arg => /^(?:-f|--filter)(?:=|$)/.test(arg))) {
+		return { name, hint: "改用 fzf --filter 等非交互筛选。" };
+	}
+	if (name === "git" && args[0] === "rebase" && args.slice(1).some(arg => arg === "-i" || arg === "--interactive")) {
+		return { name: "git rebase -i", hint: "在真实终端操作，或显式指定非交互的序列编辑器。" };
 	}
 	return null;
 }
@@ -688,6 +719,7 @@ function hardenSsh(cmd: string, shell: "bash" | "powershell"): { cmd: string; in
 
 interface CallRecord {
 	command: string;
+	program: string;
 	shell: "bash" | "powershell";
 	startedAt: number;
 	lastOutputAt: number;
@@ -731,10 +763,7 @@ function stopTicker(): void {
 function renderStatus(): void {
 	const ui = hostCtx?.ui;
 	if (!ui?.setStatus) return;
-	// One short line, never the command text: a status bar is not a log, and the
-	// long form pushed the composer around on a phone. The key carries a command
-	// so pi-web renders the cell as a button — one click opens /stall, which has
-	// the full report (what is running, for how long, what was blocked).
+	// Keep the status compact on phones; /stall shows command arguments.
 	if (!running.size) {
 		const parts: string[] = [];
 		if (stats.guarded) parts.push(`守${stats.guarded}`);
@@ -742,9 +771,23 @@ function renderStatus(): void {
 		ui.setStatus("command:/stall", parts.length ? `⛨ ${parts.join(" ")}` : undefined);
 		return;
 	}
-	let longest = 0;
-	for (const r of running.values()) longest = Math.max(longest, Date.now() - r.startedAt);
-	ui.setStatus("command:/stall", `⛨ 运行中 ${running.size} · ${fmtSec(longest)}`);
+	let longest: CallRecord | null = null;
+	for (const r of running.values()) {
+		if (!longest || r.startedAt < longest.startedAt) longest = r;
+	}
+	if (!longest) return;
+	const now = Date.now();
+	const total = now - longest.startedAt;
+	const silent = now - longest.lastOutputAt;
+	const overdue = longest.ownTimeout !== null && total >= longest.ownTimeout * 1000;
+	const marker = overdue ? "⚠" : silent >= config.noOutputStallSeconds ? "◐" : "⛨";
+	const label = longest.program || longest.shell;
+	const parallel = running.size > 1 ? `+${running.size - 1}` : "";
+	const budget = longest.ownTimeout === null ? "" : `/${fmtSec(longest.ownTimeout * 1000)}`;
+	ui.setStatus(
+		"command:/stall",
+		`${marker} ${label}${parallel} ${fmtSec(total)}${budget} · 静默 ${fmtSec(silent)}`,
+	);
 }
 
 function ensureTicker(): void {
@@ -775,7 +818,7 @@ export default function cmdGuard(pi: any): void {
 	console.error(
 		`[cmd-guard] 已加载 · timeout ${config.probeTimeout}/${config.analysisTimeout || config.defaultTimeout}/${config.heavyTimeout}s` +
 			` · GUI 拦截 ${active} 条 · 规则来源 ${rulesSource}` +
-			` · 卡死阈值 ${config.stallSeconds}s · 静默阈值 ${config.noOutputStallSeconds}s` +
+			` · 前台上限 ${config.maxTimeout}s · 静默阈值 ${config.noOutputStallSeconds}s` +
 			`${config.enforce ? "" : " · ★enforce=false，只记账不阻断"}` +
 			`${config.blockGui ? "" : " · ★blockGui=false，不拦 GUI"}` +
 			`${config.blockRootScan ? " · 盘根扫描=拦截" : " · ★blockRootScan=false，盘根扫描只抬 timeout"}`,
@@ -897,6 +940,21 @@ export default function cmdGuard(pi: any): void {
 			}
 		}
 
+		/* 在 Bash 的非交互环境，只拦已知容易等待的命令。 */
+		const interactive = shell === "bash" && config.blockInteractive ? findInteractive(cmd) : null;
+		if (interactive) {
+			const label = `${interactive.name} 需要交互或会持续运行`;
+			if (config.enforce) {
+				blocked.unshift({ at: new Date().toISOString().slice(11, 19), cmd: head(cmd, 100), reason: label });
+				if (blocked.length > 20) blocked.length = 20;
+				stats.blocked++;
+				renderStatus();
+				ctx?.ui?.notify?.(`cmd-guard 拦下：${label}`, "warning");
+				return { block: true, reason: `[cmd-guard] ${label}。${interactive.hint}` };
+			}
+			notes.push(`${label}（enforce=false，未拦截）。`);
+		}
+
 		/* 1.5 盘根递归扫描 —— 拦下而不是只抬 timeout：抬到 180s 仍是 3 分钟空转 */
 		if (config.blockRootScan) {
 			const rootHit = detectRootScan(cmd);
@@ -916,22 +974,19 @@ export default function cmdGuard(pi: any): void {
 			}
 		}
 
-		/* 2. timeout —— 不传就是无限等，这里替模型补上 */
-		const cur = typeof event.input.timeout === "number" && event.input.timeout > 0 ? event.input.timeout : 0;
-		if (RECURSIVE_SCAN.test(cmd) || DRIVE_ROOT_SCAN.test(cmd)) {
-			const want = Math.max(config.scanTimeout, cur);
-			if (want !== cur) {
-				event.input.timeout = want;
-				injected.push(`timeout=${want}（递归大目录扫描）`);
-			} else {
-				injected.push(`timeout=${cur}（模型自带，递归扫描）`);
-			}
-		} else if (!cur) {
-			const t = pickTimeout(cmd);
-			event.input.timeout = t.secs;
-			injected.push(`timeout=${t.secs}（${t.why}）`);
-		} else {
-			injected.push(`timeout=${cur}（模型自带）`);
+		/* 2. 始终使用 Pi 的秒数契约；限制前台预算，不猜模型的实际单位。 */
+		const raw = event.input.timeout;
+		const explicit = typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 0;
+		const scan = RECURSIVE_SCAN.test(cmd) || DRIVE_ROOT_SCAN.test(cmd);
+		const preset = scan ? { secs: config.scanTimeout, why: "递归大目录扫描" } : pickTimeout(cmd);
+		const budget = explicit ? (scan ? Math.max(explicit, preset.secs) : explicit) : preset.secs;
+		const timeout = Math.min(config.maxTimeout, budget);
+		if (timeout !== raw) {
+			event.input.timeout = timeout;
+			injected.push(`timeout=${timeout}s（${budget > config.maxTimeout ? "前台上限" : preset.why}）`);
+		}
+		if (explicit > config.maxTimeout) {
+			notes.push(`模型传入 timeout=${explicit}，已限制为 ${timeout}s。Pi 的 timeout 单位是秒，不是毫秒；需要常驻的任务应显式使用可管理的后台任务。`);
 		}
 
 		/* 3. ssh / scp 有界化 */
@@ -970,6 +1025,7 @@ export default function cmdGuard(pi: any): void {
 
 		running.set(event.toolCallId, {
 			command: cmd,
+			program: (invokedNames(cmd)[0] ?? "").match(/^[\w.-]{1,16}$/)?.[0] ?? "",
 			shell,
 			startedAt: Date.now(),
 			lastOutputAt: Date.now(),
@@ -986,7 +1042,9 @@ export default function cmdGuard(pi: any): void {
 	pi.on("tool_execution_update", (event: any, ctx: any) => {
 		remember(ctx);
 		const r = running.get(event.toolCallId);
-		if (r) r.lastOutputAt = Date.now();
+		if (r && event.partialResult?.content?.some((item: TextContent) => item.type === "text" && item.text)) {
+			r.lastOutputAt = Date.now();
+		}
 	});
 
 	/* 结束：记账 + 把提示回灌给模型，让它自己改 */
@@ -999,7 +1057,12 @@ export default function cmdGuard(pi: any): void {
 		renderStatus();
 
 		const secs = Math.round((Date.now() - r.startedAt) / 1000);
-		const verdict = event.isError ? "失败" : "完成";
+		const text = Array.isArray(event.content)
+			? event.content.filter((part: TextContent) => part.type === "text").at(-1)?.text ?? ""
+			: "";
+		const verdict = !event.isError ? "完成"
+			: /(?:^|\n)Command timed out after [\d.]+ seconds[.\s]*[^\n]*$/.test(text) ? "超时"
+			: /(?:^|\n)Command aborted\s*$/.test(text) ? "已中断" : "失败";
 		// 工具在问用户（need_from_user）→ 必须转达，不许自己往下做。
 		// 为什么放这里：提示词里的规则模型会忽略，工具结果里追加的文字每次都会进上下文。
 		// 实测（2026-10-24 会话 01a16e82）：seep_packer_detect 已返回 3 条问句，模型没转达就继续分析。
@@ -1032,7 +1095,7 @@ export default function cmdGuard(pi: any): void {
 		if (history.length > 20) history.length = 20;
 
 		if (secs >= config.stallSeconds) {
-			history[0].verdict += "（已过卡死阈值）";
+			history[0].verdict += "（长时运行）";
 		}
 
 		if (r.notes.length) {
@@ -1062,6 +1125,14 @@ export default function cmdGuard(pi: any): void {
 		return;
 	});
 
+	// Blocked/skipped calls may bypass tool_result (for example another extension blocks later).
+	pi.on("tool_execution_end", (event: any, ctx: any) => {
+		if (!running.delete(event.toolCallId)) return;
+		remember(ctx);
+		if (!running.size) stopTicker();
+		renderStatus();
+	});
+
 	pi.on("agent_end", (_e: unknown, ctx: any) => {
 		remember(ctx);
 		running.clear();
@@ -1086,17 +1157,18 @@ export default function cmdGuard(pi: any): void {
 				const total = Date.now() - r.startedAt;
 				const silent = Date.now() - r.lastOutputAt;
 				L.push(
-					`  ${r.shell}  已 ${fmtSec(total)}  静默 ${fmtSec(silent)}  timeout=${r.ownTimeout ?? "无"}` +
-						`${total >= config.stallSeconds ? "  ✖ 已过卡死阈值" : silent >= config.noOutputStallSeconds ? "  ◐ 长时间无输出" : ""}`,
+					`  ${r.shell}：已运行 ${fmtSec(total)}，静默 ${fmtSec(silent)}，超时预算 ${r.ownTimeout ?? "无"}s` +
+						(silent >= config.noOutputStallSeconds ? "  ◐ 长时间无输出，不一定卡死" : "") +
+						(r.ownTimeout !== null && total >= r.ownTimeout * 1000 ? "  ⚠ 已过超时预算，仍在等工具返回" : ""),
 				);
-				L.push(`    ${head(r.command, 90)}`);
+				L.push(`    命令：${head(r.command, 120)}`);
 				if (r.injected.length) L.push(`    已注入：${r.injected.join("；")}`);
 			}
 			L.push(
 				`── 本会话 ──  守卫 ${stats.guarded} 次，注入 ${stats.injected} 条，拦下 ${stats.blocked} 次`,
 			);
 			L.push(
-				`  卡死阈值 ${config.stallSeconds}s / 静默阈值 ${config.noOutputStallSeconds}s / 默认 timeout ${config.defaultTimeout}s`,
+				`  长时阈值 ${config.stallSeconds}s / 静默阈值 ${config.noOutputStallSeconds}s / timeout 上限 ${config.maxTimeout}s / 默认 timeout ${config.defaultTimeout}s`,
 			);
 			L.push(`  GUI 规则 ${[...guiTable.values()].filter((v) => v !== null).length} 条，规则源=${rulesSource}`);
 			if (blocked.length) {
@@ -1113,7 +1185,8 @@ export default function cmdGuard(pi: any): void {
 			L.push("  卡在 GUI 二进制 → 已物理拦下，按拦截理由里的 CLI 替代走。");
 			L.push("  卡在 find/grep  → 递归范围太大，收窄到子目录或加 `-maxdepth`。");
 			L.push("  卡在 npx/npm    → 首次拉包或版本解析，加 timeout 并看包管理器缓存锁。");
-			L.push("  计时器在涨 + token 不动 = 卡在命令（不在推理）→ 中断换路线，发「继续」；这种中断不会自愈。");
+			L.push("  这里只观测 Bash / PowerShell，不代表模型或 MCP 的状态。静默不等于卡死，不会触发自动中断。");
+			L.push("  Windows 后台子进程可能仍持有输出管道，超过超时还不返回时，检查进程和日志，避免盲目重跑。");
 			ctx?.ui?.notify?.(L.join("\n"), running.size ? "warning" : "info");
 		},
 	});
@@ -1139,7 +1212,7 @@ export default function cmdGuard(pi: any): void {
 			const msg =
 				`cmd-guard ${enabled ? "启用" : "停用"}｜GUI 规则 ${[...guiTable.values()].filter((v) => v !== null).length} 条` +
 				`（规则源=${rulesSource}）｜timeout ${config.probeTimeout}/${config.analysisTimeout || config.defaultTimeout}/${config.heavyTimeout}s` +
-				`｜卡死阈值 ${config.stallSeconds}s｜enforce=${config.enforce} blockGui=${config.blockGui} blockRootScan=${config.blockRootScan}` +
+				`｜前台上限 ${config.maxTimeout}s｜enforce=${config.enforce} blockGui=${config.blockGui} blockRootScan=${config.blockRootScan} blockInteractive=${config.blockInteractive}` +
 				`｜规则文件 ${fileExists(rulesPath()) ? rulesPath() : "（未建，用内置默认）"}`;
 			ctx?.ui?.notify?.(msg, enabled ? "info" : "warning");
 		},

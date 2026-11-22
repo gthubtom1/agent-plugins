@@ -1,7 +1,7 @@
 # cmd-guard（Pi Coding Agent 命令执行守卫扩展）
 
 专为 **Pi Coding Agent (`@earendil-works/pi-coding-agent`)** 打造的命令执行守卫：
-**自动给命令补超时、物理拦截 GUI 二进制、把易挂命令有界化、实时显示卡死状态**。
+**为前台命令设置超时预算，拦截明显的交互式调用，并显示运行时长和输出静默时间**。
 
 解决的是 AI 智能体最容易死的一类问题 —— **命令不返回，模型就永远停在那里**。
 
@@ -16,12 +16,7 @@ Pi 的 `bash` / `powershell` 工具的 `timeout` 参数是**可选**的，不传
 timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" }));
 ```
 
-而命令执行是**同步阻塞**的：命令不返回 → 模型不运行 → 没有任何 token 产出 → 终端计时器一直涨。
-
-**关键点：模型不可能自己发现命令卡住。** 它在等待期间不在运行、没有任何代码在跑。
-这类卡死**不会自愈** —— 只能中断，换一条路。
-
-所以这件事不能只靠提示词说「记得传 timeout」。必须有一层**物理兜底**。
+模型要等工具返回才能继续。此时 Pi 的界面仍可响应；命令没有输出，可能是正常计算、输出缓冲，也可能在等输入或子进程。cmd-guard 显示它观察到的状态，不把静默当成死锁。
 
 ### 实测的四种卡死场景
 
@@ -45,7 +40,7 @@ timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional,
 | 构建 / 解释器（`npm i` / `cargo build` / `python`） | 600s |
 | 递归大目录扫描 / 盘符根扫描 | ≥180s |
 
-**模型自带的 timeout 优先，永不被覆盖、也不会被压低。**
+`timeout` 一律按秒处理。有效显式值优先，但扫描下限和 `maxTimeout`（默认 1800 秒）仍适用。超过上限会截到上限并提示秒/毫秒区别，不猜测原意或自动换单位。
 
 ### 2. 物理拦截 GUI 二进制 ★
 
@@ -75,6 +70,8 @@ timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional,
   已经有 `ConnectTimeout` 的不重复注入；`echo "ssh is old"` 这种字符串不被改写。
 - 递归大目录扫描 / 盘符根扫描的 timeout 抬到 ≥180s，不会被 30s 的探查档误杀。
 
+- Bash 额外拦截明显需要交互或常驻的形态，如 `watch`、`vim`、`top`、交互式 `fzf` 和未指定序列编辑器的 `git rebase -i`。保留 `vim -es`、`top -b -n 1`、`fzf --filter` 等非交互用法，不把 `less`、`node` 一概拦下。新规则只检查明显的独立命令；管道、命令链、脚本等不做交互式判定，交给超时兜底。
+
 ### 4. 把坑回灌给模型（让它自己改）
 
 命中下面这些模式时，在工具结果里追加一段提示，模型看得到就会改：
@@ -84,10 +81,13 @@ timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional,
 - PowerShell 的 `start` 不带 `/b`
 - `vmrun snapshot/suspend`
 
-### 5. 卡死可见
+### 5. 长时间运行时怎么看
 
-- **底栏状态**：`● bash 1m12s · 静默 8s · <命令>`；静默超阈值变 `◐`，总时长超阈值变 `✖`
-- `/stall`：正在跑什么、卡多久、注入了什么、被拦过什么、最近 8 条执行记录，外加一份「卡在 xx → 怎么办」的处置处方
+- **底栏**：例如 `◐ npm 2m10s/10m00s · 静默 1m35s`。只展示程序名、用时、预算和静默时间，`◐` 表示较久无输出，`⚠` 表示已过预算但工具还没返回。
+- **`/stall`**：查看命令摘要、运行时长、静默时间、超时预算和最近结果（含超时或中断）。
+- **能力边界**：不按静默强杀，不自动转后台，不覆盖 Pi 自带工具。Windows 上如果子进程仍占着输出管道，Pi 的工具调用仍可能超过预算；MCP 无响应和模型流中断也不在本插件范围。
+
+参考：[`pi-prevent-stuck`](https://github.com/lukeramsden/pi-prevent-stuck) 的非 TTY 实测清单、[Pi #11743](https://github.com/earendil-works/pi/issues/11743) 的超时单位反馈、[Pi #11613](https://github.com/earendil-works/pi/issues/11613) 与 [OpenCode #20902](https://github.com/anomalyco/opencode/issues/20902) 的子进程输出管道问题。
 
 ---
 
@@ -129,8 +129,11 @@ timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional,
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `enforce` | `true` | `false` = 只记账不阻断。怀疑守卫判得不准时先关掉观察 |
-| `blockGui` | `true` | `false` = **不拦 GUI**，只注入 timeout。客户机 / VM 上用这个 |
+| `enforce` | `true` | `false` = 不执行 Shell 规则的阻断；超时和 SSH 参数调整仍生效 |
+| `blockInteractive` | `true` | Bash 下的交互式命令拦截，可单独关闭 |
+| `maxTimeout` | `1800` | Bash / PowerShell 前台超时上限（秒） |
+| `noOutputStallSeconds` | `90` | 无输出更新超过该秒数时提示静默；不会自动中断 |
+| `blockGui` | `true` | `false` 只关闭 GUI 拦截，其余规则不变 |
 | `hardenSsh` | `true` | `false` = 不改写 ssh/scp |
 | `guiBinaries` | `{}` | 手工项。值 = 替代提示语；写 `null` = **明确不拦这一条** |
 | `toolChainPaths` | `[]` | 额外再从哪些 Markdown 派生 |
@@ -138,7 +141,7 @@ timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional,
 | `allow` | `["cmd-guard-skip"]` | 命令含其中任一子串则整条跳过守卫 |
 
 **VM / 客户机版**：把同目录的 `cmd-guard.rules.vm.json` 复制成 `cmd-guard.rules.json` 即可。
-唯一实质差别是 `blockGui: false`（那边 GUI 工具是正当手段），timeout 档位按 VM 的慢速调高。
+VM 版设 `blockGui: false` 并提高部分 timeout 档位，Bash 交互式规则保持启用。
 
 改完 30 秒内自动生效，或 `/guard reload` 立即生效。
 
@@ -164,15 +167,7 @@ timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional,
 node smoke-cmd-guard.mjs
 ```
 
-用假 pi API 驱动插件，走一遍所有判定分支（26 条断言）。它用 **pi 自己的加载器 jiti**
-跑插件 —— 与 pi 真正加载扩展的路径一致，所以 `__dirname`、模块解析全都是真的。
-
-换机时指定 pi 家目录：
-
-```powershell
-$env:PI_HOME = 'D:\somewhere\.pi\agent'
-node smoke-cmd-guard.mjs
-```
+用模拟 Pi API 驱动插件，不执行用例中的命令。默认使用 Node.js 22.19+ 的 TypeScript 加载，检测到 Pi 独立安装的 jiti 则用 jiti。也可将 `PI_JITI_ANCHOR` 指向能解析 `jiti` 的 Pi 安装内的绝对文件路径。
 
 覆盖的关键行为（每一条都对应一个曾经出过问题的判定）：
 
@@ -180,7 +175,9 @@ node smoke-cmd-guard.mjs
 - 链式命令后半段的 GUI **要**被拦
 - `idat.exe` 这类 headless 工具**明确不拦**
 - 提示语带「（来源 TOOL-CHAIN.md）」= 文档驱动真的生效了
-- 递归扫描抬 timeout、模型自带 timeout 不被覆盖也不被压低
+- 递归扫描下限、有效显式预算和异常 timeout 上限
+- 交互式命令拦截、无交互替代和带引号的命令文本不误伤
+- 起始空更新不刷新静默，结束事件清理运行状态
 - `echo "ssh is old"` 不被改写；已有 `ConnectTimeout` 不重复注入
 
 ---
@@ -188,7 +185,7 @@ node smoke-cmd-guard.mjs
 ## 🔌 安装
 
 ```powershell
-pi install git:github.com/gthubtom1/agent-plugins@main
+pi install "C:/path/to/agent-plugins/plugins/pi/cmd-guard" # 先克隆仓库，只安装本插件
 ```
 
 或手动：把 `cmd-guard.ts`、`cmd-guard.rules.json` 复制到 `~/.pi/agent/extensions/`。
@@ -209,6 +206,4 @@ MIT。见 `LICENSE`。
 `--timeout` 参数、自定义禁手可被 `disableDeny` 关闭、ESM 目录解析、移除历史机器路径探测。
 `CMD_GUARD_SKILL_ROOT` 与旧环境变量仍可显式指定文档根；没有工具链文档时明确降级。
 
-Seep 的案件绑定、用户回执和风险执行依赖**没有硬塞进通用版**，完整代码在
-`../seep-workbench/`，必须跟 Seep 部署。通用版原有 `allow` 放行语义不变，
-不能把它当作 Seep 风险预算或授权系统。测试使用临时工具链文档，不依赖个人机器的目录。
+通用版不实现 Seep 的任务授权或风险预算。`allow` 的整条命令放行语义不变。

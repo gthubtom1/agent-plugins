@@ -1,10 +1,10 @@
 {
   "_说明": "cmd-guard 规则 —— 客户机 / VM 版。把本文件复制成同目录的 cmd-guard.rules.json 即生效。",
-  "_与本机版的唯一实质区别": [
+  "_与本机版的区别": [
     "blockGui = false —— 客户机里 GUI 工具是正常手段（x64dbg GUI / PE-bear / ImHex 都是主力），不能拦。",
-    "timeout 兜底、卡死记账、ssh 有界化与本机版完全一致，一个没少。"
+    "保留超时兜底、Bash 交互命令拦截和 SSH 有界化，部分超时档位按 VM 调高。"
   ],
-  "_为什么单独一份而不是改代码": "同一份 cmd-guard.ts 装在两台机器上，差别只在一个布尔。规则跟着机器走，代码不跟着机器走。",
+  "_为什么单独一份而不是改代码": "同一份 cmd-guard.ts 用不同规则配置。",
   "skillRoot": null,
   "toolChainPaths": [],
   "defaultTimeout": 120,
@@ -13,14 +13,18 @@
   "analysisTimeout": 180,
   "heavyTimeout": 900,
   "scanTimeout": 240,
+  "maxTimeout": 1800,
+  "_maxTimeout说明": "前台 Bash / PowerShell 超时上限（秒）；不推测或转换毫秒。",
+  "blockInteractive": true,
+  "_blockInteractive说明": "Bash 下拦明显需要终端交互或长期运行的命令，可单独关闭。",
   "stallSeconds": 300,
   "noOutputStallSeconds": 120,
   "enforce": true,
-  "_enforce说明": "仍然保持 true —— 拦截已经关了，但 timeout 注入是这版唯一还在物理生效的东西，关掉它这版就什么都不是了。",
+  "_enforce说明": "保持 Bash 交互命令和盘根扫描等规则的拦截。",
   "blockGui": false,
   "blockRootScan": true,
   "_blockRootScan说明": "true = 物理拦下盘根递归扫描（find / · dir /s C:\\）。只抬 timeout 不够：180s 仍是 3 分钟空转。",
-  "_blockGui说明": "★ 客户机版的唯一实质差别。false = 不拦 GUI，只注入 timeout 兜底。",
+  "_blockGui说明": "false = 不拦 GUI；其他规则照常生效。",
   "hardenSsh": true,
   "_guiBinaries说明": "本机版基本不用填。真要拦某几个（怕它们吃掉交互式会话），在这里逐条写。值为 null 表示明确不拦。",
   "guiBinaries": {},

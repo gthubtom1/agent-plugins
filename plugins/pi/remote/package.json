@@ -1,0 +1,25 @@
+{
+  "name": "pi-remote",
+  "version": "0.3.2",
+  "description": "Phone access diagnostics and connection URLs for pi-web",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package", "remote"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gthubtom1/agent-plugins.git",
+    "directory": "plugins/pi/remote"
+  },
+  "pi": {
+    "extensions": ["./remote.ts"]
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test remote.test.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "optionalDependencies": {
+    "qrcode-generator": "^2.0.4"
+  }
+}

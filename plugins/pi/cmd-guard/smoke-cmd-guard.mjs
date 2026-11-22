@@ -5,6 +5,7 @@ import assert from "node:assert";
 import { createRequire } from "node:module";
 import { existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 // A fresh checkout has no user tool-chain documents; use an explicit fixture.
 const fixture = mkdtempSync(join(tmpdir(), "cmd-guard-smoke-"));
@@ -40,6 +41,7 @@ const PI_HOME = process.env.PI_HOME || join(process.env.USERPROFILE || process.e
 const RELEASES = join(PI_HOME, "install", "releases");
 
 function findJiti() {
+  if (process.env.PI_JITI_ANCHOR) return createRequire(process.env.PI_JITI_ANCHOR)("jiti");
   if (!existsSync(RELEASES)) return null;
   for (const rel of readdirSync(RELEASES).sort().reverse()) {
     const anchor = join(
@@ -54,13 +56,10 @@ function findJiti() {
 }
 
 const jitiPkg = findJiti();
-if (!jitiPkg) {
-  console.error(`找不到 pi 的 jiti（找过 ${RELEASES}）。用 PI_HOME=<pi 家目录> 指到正确的位置。`);
-  process.exit(2);
-}
-const jiti = jitiPkg.createJiti(import.meta.url, { interopDefault: true });
-const TS_PATH = process.env.CG_TS || new URL("./cmd-guard.ts", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
-const cmdGuard = (await jiti.import(TS_PATH)).default;
+const TS_PATH = process.env.CG_TS ? resolve(process.env.CG_TS) : fileURLToPath(new URL("./cmd-guard.ts", import.meta.url));
+const cmdGuard = (await (jitiPkg
+  ? jitiPkg.createJiti(import.meta.url, { interopDefault: true }).import(TS_PATH)
+  : import(pathToFileURL(TS_PATH).href))).default;
 
 const log = [];
 const open = []; // 已发起但还没结算的调用，drain() 用
@@ -291,7 +290,7 @@ check("底栏状态确实被写过（不是空转）", () => {
   log.length = 0;
   const { event } = call("Get-ChildItem C:\\relab2");
   // 命令一开跑就该有底栏状态；命令结束后状态行要收成汇总
-  assert.ok(log.some((l) => l.kind === "status" && /运行中/.test(String(l.text))), "起跑时没写状态；log=" + JSON.stringify(log));
+  assert.ok(log.some((l) => l.kind === "status" && /get-childitem .*静默 0s/.test(String(l.text))), "起跑时没写状态；log=" + JSON.stringify(log));
   log.length = 0;
   fire("tool_execution_update", { toolCallId: event.toolCallId }, ctx);
   fire("tool_result", { toolCallId: event.toolCallId, isError: false, content: [] }, ctx);
@@ -311,5 +310,65 @@ check("rsync uses its own timeout syntax, not SSH options", () => {
   assert.match(event.input.command, /rsync --timeout=15/);
   assert.doesNotMatch(event.input.command, /-o ConnectTimeout/);
 });
+console.log("\n── 长时间运行的命令 ──");
+
+check("拦住明显的前台交互或常驻形式", () => {
+  for (const command of ["watch npm test", "vim file.txt", "top", "top -b", "fzf", "git rebase -i HEAD~2"]) {
+    assert.ok(call(command).out, command);
+  }
+});
+
+check("允许非交互替代，不拦引号、注释和 heredoc 内的文本", () => {
+  for (const command of ["watch --version", "vim -es file.txt", "top -b -n 1", "fzf --filter x", "less app.log", "node --version", "git add -p", "GIT_SEQUENCE_EDITOR=true git rebase -i HEAD~2", "git -c sequence.editor=true rebase -i HEAD~2", 'echo "text; watch npm test"', 'echo "text | vim file.txt"', "echo OK # watch", "cat <<'END'\nwatch npm test\nEND"]) {
+    assert.ok(!call(command).out, command);
+  }
+});
+
+check("不解析管道、命令链或脚本；保留 timeout 兜底", () => {
+  for (const command of ["ls | fzf", "echo ok && vim file.txt", "bash -c watch"]) {
+    const { out, event } = call(command);
+    assert.ok(!out, command);
+    assert.ok(event.input.timeout > 0, command);
+  }
+});
+
+check("两个 shell 的 timeout 按秒封顶；非有限值走默认", () => {
+  assert.equal(call("npm run build", "bash", 60_000).event.input.timeout, 1800);
+  assert.equal(call("build-it", "powershell", 60_000).event.input.timeout, 1800);
+  assert.equal(call("echo hello", "bash", Infinity).event.input.timeout, 30);
+  assert.equal(call("Get-ChildItem -Recurse C:\\Users", "powershell", 60_000).event.input.timeout, 1800);
+});
+
+check("静默计时忽略起始空更新；报告预算、超时和结束清理", () => {
+  drain();
+  const realNow = Date.now;
+  const base = realNow();
+  let elapsed = 0;
+  Date.now = () => base + elapsed;
+  const report = () => {
+    commands.get("stall").handler("", ctx);
+    return log.findLast(l => l.kind === "notify").text;
+  };
+  try {
+    const { event } = call("npm run build", "bash", 120);
+    elapsed = 91_000;
+    fire("tool_execution_update", { toolCallId: event.toolCallId, partialResult: { content: [] } }, ctx);
+    assert.match(report(), /静默 1m31s.*长时间无输出/);
+    assert.match(report(), /命令：npm run build/);
+    fire("tool_execution_update", { toolCallId: event.toolCallId, partialResult: { content: [{ type: "text", text: "building" }] } }, ctx);
+    assert.match(report(), /静默 0s，超时预算 120s/);
+    elapsed = 121_000;
+    assert.match(report(), /已过超时预算，仍在等工具返回/);
+    fire("tool_result", { toolCallId: event.toolCallId, isError: true, content: [{ type: "text", text: "building\nCommand timed out after 120 seconds" }] }, ctx);
+    assert.match(report(), /超时\s+bash\s+npm run build/);
+    const late = call("sleep 123").event;
+    fire("tool_execution_end", { toolCallId: late.toolCallId, toolName: "bash", isError: true }, ctx);
+    assert.match(report(), /当前无命令在执行/);
+  } finally {
+    Date.now = realNow;
+    drain();
+  }
+});
+
 console.log(`\n${fail === 0 ? "全部通过" : "有失败"}：${pass} 通过 / ${fail} 失败\n`);
 process.exit(fail === 0 ? 0 : 1);

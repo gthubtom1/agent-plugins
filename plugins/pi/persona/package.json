@@ -1,0 +1,22 @@
+{
+  "name": "pi-persona",
+  "version": "0.3.2",
+  "description": "Per-conversation Markdown personas for Pi",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package", "persona"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gthubtom1/agent-plugins.git",
+    "directory": "plugins/pi/persona"
+  },
+  "pi": {
+    "extensions": ["./persona.ts"]
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test persona.test.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}
