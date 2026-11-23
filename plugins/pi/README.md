@@ -5,6 +5,7 @@
 | 插件 | 命令 | 功能 |
 |---|---|---|
 | [persona](persona/README.md) | `/persona` | 选择当前对话的 Markdown 人设 |
+| [persona-old](persona-old/README.md) | `/persona` | 精简前的完整人设历史版，按需安装，不与 persona 同时启用 |
 | [rewind](rewind/README.md) | `/rewind`、`/undo-reply` | 回退对话或撤销最后一条纯文本回复 |
 | [remote](remote/README.md) | `/remote` | pi-web 远程连接信息和配置 |
 | [retry-level](retry-level/README.md) | `/retry` | 调整模型请求重试档位 |

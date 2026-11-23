@@ -1,0 +1,30 @@
+{
+  "name": "pi-persona-old",
+  "version": "0.3.2",
+  "description": "Historical full persona workflow restored from pi-seep-ext at 388def3a183ca805955e2bfbd224366b6e65e7f4",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gthubtom1/agent-plugins.git",
+    "directory": "plugins/pi/persona-old"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/persona.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test \"test/*.test.mjs\"",
+    "test:sdk": "node scripts/test-sdk.mjs"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*"
+  },
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "persona",
+    "legacy"
+  ]
+}

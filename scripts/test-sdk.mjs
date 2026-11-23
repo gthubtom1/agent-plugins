@@ -50,6 +50,9 @@ try {
     await check(pkg, [entry], commands);
   }
   await check(root, entries, Object.values(commandsByPackage).flat());
+  // The historical persona is opt-in and must not be added to the root bundle.
+  const oldPersona = join(root, "plugins", "pi", "persona-old");
+  await check(oldPersona, [join(oldPersona, "extensions", "persona.ts")], ["persona"]);
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
