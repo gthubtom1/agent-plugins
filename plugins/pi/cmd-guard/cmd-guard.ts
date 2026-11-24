@@ -844,25 +844,6 @@ export default function cmdGuard(pi: any): void {
 		remember(ctx);
 		if (!enabled) return;
 		const name = event.toolName;
-		// ★ 弹窗式问人一律拦下（2026-10-23 用户明确要求，已强调多次）。
-		//   理由：① 选项只能 2–4 个、每项 ≤60 字，四要素长卡塞不进去；
-		//         ② 它把「等人」变成一次工具往返，给上下文塞结构化噪声；
-		//         ③ 用户要的是“对话框里列 A/B/C/D，我回一个字母”。
-		if (name === "ask_user_question") {
-			const reason =
-				`[cmd-guard] 已拦下：弹窗式问人（ask_user_question）不用于本项目。\n` +
-				`改用对话内 A/B/C：先把卡落盘并列出选项，然后把下面这段**原样贴进对话**：\n\n` +
-				`  【需要你选】<一句话：卡在哪>\n` +
-				`    A  …\n` +
-				`    B  …\n` +
-				`    C  …\n` +
-				`  直接回 A / B / C\n\n` +
-				`落盘与回执：\n` +
-				`  python Tool/scripts/case_state.py ask --case <case> --stuck "..." --option "A ..." --option "B ..." --option "C ..."\n` +
-				`  python Tool/scripts/case_state.py ack --case <case> --ack A\n\n` +
-				`（ask 会打印可直接粘贴的卡片；等待态写在 state.awaiting_human）`;
-			return { block: true, reason };
-		}
 		if (name !== "bash" && name !== "powershell") return;
 		const shell: "bash" | "powershell" = name === "bash" ? "bash" : "powershell";
 		let cmd = String(event.input?.command ?? "");
