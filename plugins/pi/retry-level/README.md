@@ -1,9 +1,9 @@
 # retry-level（Pi Coding Agent 重试档位扩展）
 
 给 **Pi Coding Agent (`@earendil-works/pi-coding-agent`)** 加一个可调档的重试策略：
-**菜单切档 + 状态栏常显 + 无限档可随时中断**。
+**菜单切档 + 无限档可随时中断**。
 
-比老版 `pi-infinite-retry` 更实用：那版只有「开/关」，这版有档位、有菜单、状态栏一直显示当前档位。
+比老版 `pi-infinite-retry` 更实用：那版只有「开/关」，这版有档位、有菜单，可用 `/retry status` 查看当前档位。
 
 ---
 
@@ -26,7 +26,7 @@ Pi 内核的默认重试上限是 **3 次**。遇到上游网关抖动（`502` /
 | `/retry <档位>` | 直接切：`off` \| `3` \| `5` \| `10` \| `15` \| `30` \| `infinite` |
 | `/retry status` | 查看当前档位 |
 
-**底部状态栏始终显示当前档位** —— 不会再出现「设了 10 次却什么都不显示」。
+底栏不显示常驻或运行中状态；通过 `/retry` 菜单或 `/retry status` 查看当前档位，切档通知照常显示。
 
 ---
 
@@ -60,7 +60,7 @@ cp retry-level.ts ~/.pi/agent/extensions/
 | | `retry-level`（本插件） | `pi-infinite-retry`（老版） |
 |---|---|---|
 | 档位 | 7 档菜单 | 只有开/关 |
-| 状态栏 | ✅ 常显 | ❌ 无 |
+| 状态查看 | `/retry` 菜单、`/retry status` | 开/关 |
 | 循环切档 | ✅ `/retry cycle` | ❌ |
 | 建议 | **用这个** | 源码保留作参考 |
 

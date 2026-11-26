@@ -1,7 +1,7 @@
 {
   "name": "pi-cmd-guard",
   "version": "2.1.3",
-  "description": "Pi Coding Agent 命令执行守卫：自动补 timeout、物理拦截 GUI 二进制、ssh 有界化、卡死状态栏",
+  "description": "Pi Coding Agent 命令执行守卫：自动补 timeout、物理拦截 GUI 二进制、ssh 有界化、/stall 健康报告",
   "main": "cmd-guard.ts",
   "scripts": {
     "test": "node smoke-cmd-guard.mjs"

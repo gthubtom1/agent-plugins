@@ -1,6 +1,6 @@
 {
   "name": "agent-plugins",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "多智能体插件库：面向 Pi Coding Agent / Claude Code / Codex / dsh / OpenCode 的插件精选",
   "keywords": [
     "pi-package",
@@ -15,7 +15,8 @@
       "./plugins/pi/retry-level/retry-level.ts",
       "./plugins/pi/persona/persona.ts",
       "./plugins/pi/rewind/rewind.ts",
-      "./plugins/pi/remote/remote.ts"
+      "./plugins/pi/remote/remote.ts",
+      "./plugins/pi/lab/index.ts"
     ]
   },
   "repository": {

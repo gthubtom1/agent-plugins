@@ -14,7 +14,7 @@
  *   2. 拦 GUI 二进制   弹窗等输入、零 stdout、进程永不退 —— 同步等它 = 整轮卡死
  *   3. 有界化易挂命令   ssh/scp 补 ConnectTimeout；超大递归扫描抬 timeout
  *   4. 把坑回灌给模型   长链命令、`start` 不带 /b、vmrun 快照锁等，在结果里回一句
- *   5. 卡死可见         底栏实时状态（已跑多久 / 静默多久）+ `/stall` 报告
+ *   5. 卡死可见         `/stall` 报告（已跑多久 / 静默多久）
  *
  * ── 它不做什么 ───────────────────────────────────────────────
  *   · 不解决「上游把 tool_use 结构化块当纯文本返回」那类 API 格式问题。
@@ -60,7 +60,7 @@ interface GuardConfig {
 	blockInteractive: boolean;
 	/** 超过它标记为长时运行（不是卡死判定） */
 	stallSeconds: number;
-	/** 超过它没有输出更新，底栏显示静默标记 */
+	/** 超过它没有输出更新，/stall 报告显示静默标记 */
 	noOutputStallSeconds: number;
 	/** false = 只记账不阻断（出问题时先观察，不打断） */
 	enforce: boolean;
@@ -761,33 +761,8 @@ function stopTicker(): void {
 }
 
 function renderStatus(): void {
-	const ui = hostCtx?.ui;
-	if (!ui?.setStatus) return;
-	// Keep the status compact on phones; /stall shows command arguments.
-	if (!running.size) {
-		const parts: string[] = [];
-		if (stats.guarded) parts.push(`守${stats.guarded}`);
-		if (stats.blocked) parts.push(`拦${stats.blocked}`);
-		ui.setStatus("command:/stall", parts.length ? `⛨ ${parts.join(" ")}` : undefined);
-		return;
-	}
-	let longest: CallRecord | null = null;
-	for (const r of running.values()) {
-		if (!longest || r.startedAt < longest.startedAt) longest = r;
-	}
-	if (!longest) return;
-	const now = Date.now();
-	const total = now - longest.startedAt;
-	const silent = now - longest.lastOutputAt;
-	const overdue = longest.ownTimeout !== null && total >= longest.ownTimeout * 1000;
-	const marker = overdue ? "⚠" : silent >= config.noOutputStallSeconds ? "◐" : "⛨";
-	const label = longest.program || longest.shell;
-	const parallel = running.size > 1 ? `+${running.size - 1}` : "";
-	const budget = longest.ownTimeout === null ? "" : `/${fmtSec(longest.ownTimeout * 1000)}`;
-	ui.setStatus(
-		"command:/stall",
-		`${marker} ${label}${parallel} ${fmtSec(total)}${budget} · 静默 ${fmtSec(silent)}`,
-	);
+	// 仅清理旧版本留下的底栏状态；运行详情仍通过 /stall 查看。
+	hostCtx?.ui?.setStatus?.("command:/stall", undefined);
 }
 
 function ensureTicker(): void {
@@ -831,6 +806,7 @@ export default function cmdGuard(pi: any): void {
 
 	pi.on("session_start", (_e: unknown, ctx: any) => {
 		remember(ctx);
+		renderStatus();
 		if (!guiTable.size || rulesSource.includes("★")) {
 			ctx?.ui?.notify?.(
 				`cmd-guard 降级中：${rulesSource}\n` +

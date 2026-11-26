@@ -128,7 +128,7 @@ test("the persona extension registers its command and hook, and shows the status
 
   const ctx = fakeContext();
   await handlers.get("session_start")[0]({}, ctx);
-  assert.deepEqual(ctx.statuses.at(-1), { key: "command:/persona", text: "🧑‍🎤 人设：无" });
+  assert.deepEqual(ctx.statuses.at(-1), { key: "command:/persona", text: "无" });
 });
 
 test("choosing a persona in the dialog records it in the conversation and in the status line", async () => {
@@ -140,7 +140,7 @@ test("choosing a persona in the dialog records it in the conversation and in the
   await commands.get("persona").handler("", ctx);
 
   assert.deepEqual(appended, [{ customType: "pi-seep-ext:persona", data: { personaId: "破甲v2" } }]);
-  assert.deepEqual(ctx.statuses.at(-1), { key: "command:/persona", text: "🧑‍🎤 人设：破甲v2" });
+  assert.deepEqual(ctx.statuses.at(-1), { key: "command:/persona", text: "破甲v2" });
 });
 
 test("Esc in the picker changes nothing at all", async () => {
@@ -175,7 +175,7 @@ test("/persona off clears the persona even when the file still exists", async ()
   const ctx = fakeContext();
   await commands.get("persona").handler("off", ctx);
   assert.deepEqual(appended, [{ customType: "pi-seep-ext:persona", data: { personaId: null } }]);
-  assert.deepEqual(ctx.statuses.at(-1), { key: "command:/persona", text: "🧑‍🎤 人设：无" });
+  assert.deepEqual(ctx.statuses.at(-1), { key: "command:/persona", text: "无" });
 });
 
 test("/persona <unknown> warns with the names that do exist", async () => {
@@ -348,7 +348,7 @@ test("/persona badge turns the bigger widget line on, and the status cell always
   ctx.ui.setWidget = (key, content) => widgets.push({ key, content });
   await commands.get("persona").handler("", ctx);
 
-  assert.deepEqual(ctx.statuses.at(-1), { key: "command:/persona", text: "🧑‍🎤 人设：破甲v2" });
+  assert.deepEqual(ctx.statuses.at(-1), { key: "command:/persona", text: "破甲v2" });
   assert.equal(widgets.at(-1).content, undefined, "the badge is off by default");
 
   await commands.get("persona").handler("badge", ctx);

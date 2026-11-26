@@ -81,7 +81,7 @@ export default function personaExtension(pi: ExtensionApi): void {
    *
    * - a status cell under the composer. pi-web renders a `command:` key as a
    *   button that sends that slash command, so the label doubles as the entry
-   *   point (`人设：色情破甲` → click → picker), on upstream pi-web as well;
+   *   point (`破甲v2` → click → picker), on upstream pi-web as well;
    * - optionally a widget line in the same shelf, for people who want it bigger
    *   (`/persona badge on`). Widgets are display-only, so the status cell stays
    *   the clickable one.
@@ -94,7 +94,7 @@ export default function personaExtension(pi: ExtensionApi): void {
     settings: PersonaSettings = readSettings(agentDir),
   ): void {
     const personaId = currentPersona(sessionEntriesOf(ctx), settings);
-    ctx.ui.setStatus(STATUS_KEY, personaId ? `🧑‍🎤 人设：${personaId}` : "🧑‍🎤 人设：无");
+    ctx.ui.setStatus(STATUS_KEY, personaId ?? "无");
     if (typeof ctx.ui.setWidget === "function") {
       ctx.ui.setWidget(
         WIDGET_KEY,

@@ -18,7 +18,7 @@
   "stallSeconds": 240,
   "_stall说明": "超过它还没结束 = 长时运行，记入 /stall 历史（不是卡死判定）。",
   "noOutputStallSeconds": 90,
-  "_noOutput说明": "超过它没有新输出，底栏显示 ◐。这不是卡死判定，不会自动中断。",
+  "_noOutput说明": "超过它没有新输出，/stall 报告显示 ◐。这不是卡死判定，不会自动中断。",
   "enforce": true,
   "_enforce说明": "false = Shell 规则只提示不阻断；超时和 SSH 参数调整仍生效。",
   "blockGui": true,

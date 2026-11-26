@@ -29,7 +29,7 @@ pi install ./plugins/pi/persona-old
 | `/persona mode` | 切换 `cached` 和 `every-turn` 注入模式 |
 | `/persona badge` | 切换输入框附近的人设徽标 |
 
-状态栏保留可点击的人设入口。`cached` 使用结构化提示词增量；`every-turn` 在每次模型请求时重放完整系统提示词及当前人设。会话选择保留原来的 `pi-seep-ext:persona` 标记，兼容旧会话。
+状态栏保留可点击的人设入口，仅显示当前人设名称；未选择时显示「无」，不带 emoji 和「人设：」前缀。`cached` 使用结构化提示词增量；`every-turn` 在每次模型请求时重放完整系统提示词及当前人设。会话选择保留原来的 `pi-seep-ext:persona` 标记，兼容旧会话。
 
 ## 历史来源
 
@@ -38,7 +38,7 @@ pi install ./plugins/pi/persona-old
 - 原路径：`plugins/pi/pi-seep-ext`
 - 原包版本：`0.3.2`
 
-`extensions/persona.ts` 和本包 `lib/` 下的 TypeScript 文件逐字节保留该历史提交。改动限于独立包清单、说明及测试拆分；没有导入后来精简版的人设代码，也不附带本机私人角色资料。
+`extensions/persona.ts` 和本包 `lib/` 下的 TypeScript 文件基于该历史提交。底栏标签改为仅显示名称或「无」，其余人设逻辑保留原实现；没有导入后来精简版的人设代码，也不附带本机私人角色资料。
 
 ## 验证
 

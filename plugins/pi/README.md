@@ -9,7 +9,8 @@
 | [rewind](rewind/README.md) | `/rewind`、`/undo-reply` | 回退对话或撤销最后一条纯文本回复 |
 | [remote](remote/README.md) | `/remote` | pi-web 远程连接信息和配置 |
 | [retry-level](retry-level/README.md) | `/retry` | 调整模型请求重试档位 |
-| [cmd-guard](cmd-guard/README.md) | `/guard`、`/stall` | 前台命令超时兜底和状态显示 |
+| [cmd-guard](cmd-guard/README.md) | `/guard`、`/stall` | 前台命令超时兜底和卡死检测，底栏不显示 |
+| [lab](lab/README.md) | `/lab`、`/LAB` | 保存常用语，添加 `lab:` 前缀填入输入框 |
 
 先克隆仓库，再在仓库根目录安装需要的插件，例如：
 

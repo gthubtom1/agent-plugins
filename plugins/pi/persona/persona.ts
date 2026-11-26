@@ -36,7 +36,7 @@ export default function personaExtension(pi: ExtensionApi): void {
 
   function updateStatus(ctx: BaseContext, settings: PersonaSettings = readSettings(agentDir)): void {
     const personaId = selectionOf(ctx);
-    ctx.ui.setStatus("command:/persona", `🧑‍🎤 人设：${personaId ?? "无"}`);
+    ctx.ui.setStatus("command:/persona", personaId ?? "无");
     if (typeof ctx.ui.setWidget === "function") {
       ctx.ui.setWidget(
         "persona",

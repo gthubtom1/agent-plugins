@@ -285,16 +285,17 @@ check("/guard off 后不再拦截，on 后恢复", () => {
   assert.ok(on.out && on.out.block === true, "on 之后没恢复拦截");
 });
 
-check("底栏状态确实被写过（不是空转）", () => {
+check("底栏状态仅清理，运行中和结束后均不显示", () => {
   drain(); // 前面的用例留下的未结算调用先清掉
   log.length = 0;
   const { event } = call("Get-ChildItem C:\\relab2");
-  // 命令一开跑就该有底栏状态；命令结束后状态行要收成汇总
-  assert.ok(log.some((l) => l.kind === "status" && /get-childitem .*静默 0s/.test(String(l.text))), "起跑时没写状态；log=" + JSON.stringify(log));
+  assert.ok(log.some((l) => l.kind === "status" && l.key === "command:/stall" && l.text === undefined), "起跑时没清理旧状态");
+  assert.ok(log.every((l) => l.kind !== "status" || l.text === undefined), "运行中显示了底栏状态");
   log.length = 0;
   fire("tool_execution_update", { toolCallId: event.toolCallId }, ctx);
   fire("tool_result", { toolCallId: event.toolCallId, isError: false, content: [] }, ctx);
-  assert.ok(log.some((l) => l.kind === "status" && /⛨|guard/.test(String(l.text))), "结束后没收状态");
+  assert.ok(log.some((l) => l.kind === "status" && l.key === "command:/stall" && l.text === undefined), "结束后没清理旧状态");
+  assert.ok(log.every((l) => l.kind !== "status" || l.text === undefined), "结束后显示了底栏汇总");
 });
 
 check("quoted read-only network config search is not a mutation", () => {

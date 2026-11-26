@@ -1,7 +1,7 @@
 # cmd-guard（Pi Coding Agent 命令执行守卫扩展）
 
 专为 **Pi Coding Agent (`@earendil-works/pi-coding-agent`)** 打造的命令执行守卫：
-**为前台命令设置超时预算，拦截明显的交互式调用，并显示运行时长和输出静默时间**。
+**为前台命令设置超时预算，拦截明显的交互式调用，并通过 `/stall` 查看运行时长和输出静默时间**。
 
 解决的是 AI 智能体最容易死的一类问题 —— **命令不返回，模型就永远停在那里**。
 
@@ -16,7 +16,7 @@ Pi 的 `bash` / `powershell` 工具的 `timeout` 参数是**可选**的，不传
 timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" }));
 ```
 
-模型要等工具返回才能继续。此时 Pi 的界面仍可响应；命令没有输出，可能是正常计算、输出缓冲，也可能在等输入或子进程。cmd-guard 显示它观察到的状态，不把静默当成死锁。
+模型要等工具返回才能继续。此时 Pi 的界面仍可响应；命令没有输出，可能是正常计算、输出缓冲，也可能在等输入或子进程。cmd-guard 通过 `/stall` 报告它观察到的状态，不把静默当成死锁。
 
 ### 实测的四种卡死场景
 
@@ -83,8 +83,8 @@ timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional,
 
 ### 5. 长时间运行时怎么看
 
-- **底栏**：例如 `◐ npm 2m10s/10m00s · 静默 1m35s`。只展示程序名、用时、预算和静默时间，`◐` 表示较久无输出，`⚠` 表示已过预算但工具还没返回。
-- **`/stall`**：查看命令摘要、运行时长、静默时间、超时预算和最近结果（含超时或中断）。
+- **底栏**：不显示常驻汇总或运行中状态；拦截通知和命令弹窗照常显示。
+- **`/stall`**：查看命令摘要、运行时长、静默时间、超时预算和最近结果（含超时或中断）。`◐` 表示较久无输出，`⚠` 表示已过预算但工具还没返回。
 - **能力边界**：不按静默强杀，不自动转后台，不覆盖 Pi 自带工具。Windows 上如果子进程仍占着输出管道，Pi 的工具调用仍可能超过预算；MCP 无响应和模型流中断也不在本插件范围。
 
 参考：[`pi-prevent-stuck`](https://github.com/lukeramsden/pi-prevent-stuck) 的非 TTY 实测清单、[Pi #11743](https://github.com/earendil-works/pi/issues/11743) 的超时单位反馈、[Pi #11613](https://github.com/earendil-works/pi/issues/11613) 与 [OpenCode #20902](https://github.com/anomalyco/opencode/issues/20902) 的子进程输出管道问题。
@@ -132,7 +132,7 @@ timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional,
 | `enforce` | `true` | `false` = 不执行 Shell 规则的阻断；超时和 SSH 参数调整仍生效 |
 | `blockInteractive` | `true` | Bash 下的交互式命令拦截，可单独关闭 |
 | `maxTimeout` | `1800` | Bash / PowerShell 前台超时上限（秒） |
-| `noOutputStallSeconds` | `90` | 无输出更新超过该秒数时提示静默；不会自动中断 |
+| `noOutputStallSeconds` | `90` | 无输出更新超过该秒数时在 `/stall` 报告中提示静默；不会自动中断 |
 | `blockGui` | `true` | `false` 只关闭 GUI 拦截，其余规则不变 |
 | `hardenSsh` | `true` | `false` = 不改写 ssh/scp |
 | `guiBinaries` | `{}` | 手工项。值 = 替代提示语；写 `null` = **明确不拦这一条** |

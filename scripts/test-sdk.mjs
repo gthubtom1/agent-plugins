@@ -21,6 +21,7 @@ const commandsByPackage = {
   remote: ["remote"],
   "cmd-guard": ["guard", "stall"],
   "retry-level": ["retry"],
+  lab: ["lab", "LAB"],
 };
 
 try {

@@ -1,0 +1,16 @@
+{
+  "name": "pi-lab",
+  "version": "1.0.0",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gthubtom1/agent-plugins.git",
+    "directory": "plugins/pi/lab"
+  },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": ">=1.0.0" },
+  "description": "LAB 常用语：弹窗新增、修改和删除，带 lab: 前缀填入输入框",
+  "keywords": ["pi-package"],
+  "pi": { "extensions": ["./index.ts"] },
+  "scripts": { "test": "node --experimental-strip-types --test test/lab.test.mjs" }
+}

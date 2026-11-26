@@ -6,7 +6,7 @@
  * /retry <档位>          直接切档：off | 3 | 5 | 10 | 15 | 30 | infinite
  * /retry status          查看当前档位
  *
- * 底部状态栏始终显示当前档位，不会再出现"设了 10 次却什么都不显示"。
+ * 当前档位通过 /retry 菜单或 /retry status 查看，不显示底栏状态。
  * 无限档是 9999 次 + 指数避让，**随时可按 Esc 中断**（pi 自带重试取消键）。
  */
 
@@ -234,7 +234,7 @@ export default function retryLevelExtension(pi: ExtensionAPI) {
 
 			if (lower === "status" || lower === "info") {
 				ctx.ui.notify(`当前档位：${statusText(current)}`, "info");
-				ctx.ui.setStatus("command:/retry", statusText(current));
+				ctx.ui.setStatus("command:/retry", undefined);
 				return;
 			}
 
@@ -260,7 +260,7 @@ export default function retryLevelExtension(pi: ExtensionAPI) {
 			}
 
 			const { ok, message } = apply(target);
-			if (ok) ctx.ui.setStatus("command:/retry", statusText(target));
+			if (ok) ctx.ui.setStatus("command:/retry", undefined);
 			ctx.ui.notify(message, ok ? "info" : "error");
 			if (ok) await ctx.reload();
 		},
@@ -289,7 +289,7 @@ export default function retryLevelExtension(pi: ExtensionAPI) {
 		// 先中止当前运行，避免宿主继续安排重试；设置留给下次重载生效。
 		ctx.abort();
 		const { ok, message } = apply(LEVELS[1]);
-		if (ok) ctx.ui.setStatus("command:/retry", statusText(LEVELS[1]));
+		if (ok) ctx.ui.setStatus("command:/retry", undefined);
 		ctx.ui.notify(
 			`${ok ? "检测到无法自动恢复的错误，已请求停止当前重试；3 次设置将在重载后生效。" : "检测到无法自动恢复的错误，已请求停止当前重试，但未能保存设置。"}${message}\n详情：${text.slice(0, 160)}`,
 			"warning",
@@ -297,7 +297,7 @@ export default function retryLevelExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
-		const settings = readSettings();
-		ctx.ui.setStatus("command:/retry", settings ? statusText(currentLevel(settings)) : "重试: 未知（设置不可读）");
+		// 清理旧版本留下的底栏状态。
+		ctx.ui.setStatus("command:/retry", undefined);
 	});
 }
