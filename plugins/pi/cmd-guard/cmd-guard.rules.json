@@ -28,7 +28,12 @@
   "hardenSsh": true,
   "_hardenSsh说明": "给真命令位置上的 ssh/scp/sftp/rsync 补 -o ConnectTimeout=15 与心跳，bash 侧再补 </dev/null 断交互提示。",
   "_guiBinaries说明": "手工补充/覆盖。值 = 给模型的替代提示语；值写 null 或空串 = 明确不拦这一条。优先级最高，会覆盖 TOOL-CHAIN.md 的派生结果。索引不存在的工具、或者要把某个工具从拦改成不拦，都写这里。",
-  "guiBinaries": {},
+  "guiBinaries": {
+    "ida.exe": "改用 seep_tool_runtime ensure（SEEP MCP：tool=ida，interface=gui）带超时受控启动，或走 IDA MCP（ida_pro_mcp server.py）服务端分析；不要 bash 同步等 GUI",
+    "ida64.exe": "改用 seep_tool_runtime ensure（SEEP MCP：tool=ida，interface=gui）带超时受控启动，或走 IDA MCP（ida_pro_mcp server.py）服务端分析；不要 bash 同步等 GUI",
+    "x64dbg.exe": "改用 seep_tool_runtime ensure（SEEP MCP：tool=x64dbg，interface=gui）带超时受控启动并复用已有进程；不要 bash 同步等 GUI",
+    "x32dbg.exe": "改用 seep_tool_runtime ensure（SEEP MCP：tool=x32dbg，interface=gui）带超时受控启动并复用已有进程；不要 bash 同步等 GUI"
+  },
   "_allow说明": "整条命令含其中任一子串就整条跳过守卫（救急用，慎用）。默认的 cmd-guard-skip 可以让单条命令临时放行。",
   "allow": [
     "cmd-guard-skip"
