@@ -244,7 +244,7 @@ const DEFAULTS: GuardConfig = {
 	noOutputStallSeconds: 90,
 	blockInteractive: true,
 	enforce: true,
-	blockGui: true,
+	blockGui: false,
 	blockRootScan: true,
 	hardenSsh: true,
 	guiBinaries: {},

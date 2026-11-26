@@ -42,11 +42,11 @@ timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional,
 
 `timeout` 一律按秒处理。有效显式值优先，但扫描下限和 `maxTimeout`（默认 1800 秒）仍适用。超过上限会截到上限并提示秒/毫秒区别，不猜测原意或自动换单位。
 
-### 2. 物理拦截 GUI 二进制 ★
+### 2. GUI 程序默认放行（可选严格拦截）
 
-命中即**拒绝执行**，并把替代方案直接写进拦截理由：
+命令默认允许启动 GUI 程序，因为 IDA、x64dbg、Wireshark 等工具本来就需要窗口。GUI 名单仍然保留，用于识别工具和在需要时启用严格模式。把 `cmd-guard.rules.json` 的 `blockGui` 改成 `true` 后，命中名单的程序才会被拒绝执行，并给出 CLI 或 headless 替代方案：
 
-```
+```text
 [cmd-guard] 已拦下：`die.exe` 是 GUI/交互式程序。
 它会弹窗等输入、零 stdout、进程永不退出；命令阻塞期间模型不在运行，物理上无法自愈。
 改用：改用 CLI 版 diec（先 --version 确认参数）
@@ -54,9 +54,9 @@ timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional,
 无值再按 TOOL-CHAIN.md 的四级递进（env → PATH → _map.json 别名 → 递归兜底）。
 ```
 
-**只拦「命令位置」上的二进制**，不拦字符串和路径参数：
+**只识别「命令位置」上的二进制**，不识别字符串和路径参数；默认模式下这些命令都会放行，严格模式才会拦截：
 
-| 命令 | 结果 |
+| 命令 | 严格模式结果 |
 |---|---|
 | `die.exe sample.exe` | 🚫 拦下 |
 | `Test-Path D:\Tools\DIE\die.exe` | ✅ 放行（这是探测文件在不在） |
@@ -133,15 +133,14 @@ timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional,
 | `blockInteractive` | `true` | Bash 下的交互式命令拦截，可单独关闭 |
 | `maxTimeout` | `1800` | Bash / PowerShell 前台超时上限（秒） |
 | `noOutputStallSeconds` | `90` | 无输出更新超过该秒数时在 `/stall` 报告中提示静默；不会自动中断 |
-| `blockGui` | `true` | `false` 只关闭 GUI 拦截，其余规则不变 |
+| `blockGui` | `false` | 默认放行 GUI 程序；设为 `true` 才物理拦截 GUI 名单中的程序 |
 | `hardenSsh` | `true` | `false` = 不改写 ssh/scp |
 | `guiBinaries` | `{}` | 手工项。值 = 替代提示语；写 `null` = **明确不拦这一条** |
 | `toolChainPaths` | `[]` | 额外再从哪些 Markdown 派生 |
 | `skillRoot` | `null` | 留空 = 自动探测 |
 | `allow` | `["cmd-guard-skip"]` | 命令含其中任一子串则整条跳过守卫 |
 
-**VM / 客户机版**：把同目录的 `cmd-guard.rules.vm.json` 复制成 `cmd-guard.rules.json` 即可。
-VM 版设 `blockGui: false` 并提高部分 timeout 档位，Bash 交互式规则保持启用。
+**当前默认策略**：GUI 程序允许启动，timeout、交互式命令、盘根扫描和网络危险操作继续受保护。需要严格防止 GUI 从 Shell 启动时，把 `blockGui` 改为 `true`，然后运行 `/guard reload`。
 
 改完 30 秒内自动生效，或 `/guard reload` 立即生效。
 
@@ -172,7 +171,7 @@ node smoke-cmd-guard.mjs
 覆盖的关键行为（每一条都对应一个曾经出过问题的判定）：
 
 - `Test-Path <gui.exe>` / `echo "<gui.exe>"` **不能**被误拦（位置识别）
-- 链式命令后半段的 GUI **要**被拦
+- 链式命令后半段的 GUI 遵循 `blockGui` 配置
 - `idat.exe` 这类 headless 工具**明确不拦**
 - 提示语带「（来源 TOOL-CHAIN.md）」= 文档驱动真的生效了
 - 递归扫描下限、有效显式预算和异常 timeout 上限

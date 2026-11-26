@@ -102,10 +102,9 @@ function check(name, fn) {
 
 console.log("\n── GUI 拦截 ──");
 
-check("die.exe 被拦（内置表）", () => {
+check("die.exe 默认放行（blockGui=false）", () => {
   const { out } = call("D:\\Tools\\DIE\\die.exe sample.exe");
-  assert.ok(out && out.block === true, "没返回 block");
-  assert.match(out.reason, /diec/);
+  assert.ok(!out, "默认不应拦 GUI");
 });
 
 // 注意：Wireshark 也在内置表里，所以「被拦」证明不了派生。
@@ -117,10 +116,9 @@ check("提示语带「来源」标记 = 确实从 TOOL-CHAIN.md 派生来的", (
   assert.ok(derived.length > 0, "一条派生项都没有，文档驱动没生效；rules=\n" + t);
 });
 
-check("Wireshark.exe 被拦且给出 tshark 替代", () => {
+check("Wireshark.exe 默认放行（blockGui=false）", () => {
   const { out } = call("Wireshark.exe -r x.pcap");
-  assert.ok(out && out.block === true, "没被拦");
-  assert.match(out.reason, /tshark/);
+  assert.ok(!out, "默认不应拦 GUI");
 });
 
 check("idat.exe 明确不拦（headless）", () => {
@@ -138,9 +136,9 @@ check("echo 里的工具名不误拦", () => {
   assert.ok(!out, "字符串里的名字被当成命令了");
 });
 
-check("链式命令的后半段仍会被拦", () => {
+check("链式命令的后半段默认放行 GUI", () => {
   const { out } = call("echo hi && die.exe sample.exe");
-  assert.ok(out && out.block === true, "链后半段漏拦");
+  assert.ok(!out, "默认不应拦 GUI");
 });
 
 check("find / 盘根递归被拦（v2.1.0 新增）", () => {
@@ -276,13 +274,13 @@ check("/guard rules 列出派生名目", () => {
   assert.match(t, /tshark/, "派生项没列出来");
 });
 
-check("/guard off 后不再拦截，on 后恢复", () => {
+check("/guard off/on 遵循 blockGui 配置", () => {
   commands.get("guard").handler("off", ctx);
   const off = call("die.exe x.exe");
   assert.ok(!off.out, "off 之后还在拦");
   commands.get("guard").handler("on", ctx);
   const on = call("die.exe x.exe");
-  assert.ok(on.out && on.out.block === true, "on 之后没恢复拦截");
+  assert.ok(!on.out, "blockGui=false 时 on 也应放行 GUI");
 });
 
 check("底栏状态仅清理，运行中和结束后均不显示", () => {
