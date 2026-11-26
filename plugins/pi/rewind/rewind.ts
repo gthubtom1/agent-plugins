@@ -9,7 +9,7 @@ import type { BaseContext, CommandContext, ExtensionApi } from "./lib/pi-api.ts"
 
 /** A `command:` status key is painted as a button that sends that slash command. */
 const STATUS_KEY = "command:/undo-reply";
-const STATUS_LABEL = "⟲ 回退";
+const STATUS_LABEL = "⟲";
 
 /**
  * Undoing a turn, as a pi extension.
@@ -30,7 +30,7 @@ const STATUS_LABEL = "⟲ 回退";
  *   because that is what the person reaching for "undo" wanted anyway — it just
  *   needs the explicit confirmation.
  *
- * Both are also what the status-bar「⟲ 回退」cell sends, so the cell stays a
+ * Both are also what the status-bar「⟲」cell sends, so the cell stays a
  * dumb sender and every safety rule lives here.
  */
 export default function rewindExtension(pi: ExtensionApi): void {

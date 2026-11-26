@@ -109,7 +109,7 @@ test("the status bar gets a one-click 回退 cell", () => {
 
   const cell = ctx.statuses.at(-1);
   assert.equal(cell.key, "command:/undo-reply");
-  assert.match(cell.text, /回退/);
+  assert.equal(cell.text, "⟲");
 });
 
 test("/undo-reply never drops a turn with tool work without confirmation", async () => {
