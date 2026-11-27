@@ -1,208 +1,98 @@
-# cmd-guard（Pi Coding Agent 命令执行守卫扩展）
+# cmd-guard（Pi Coding Agent 命令执行守卫）
 
-专为 **Pi Coding Agent (`@earendil-works/pi-coding-agent`)** 打造的命令执行守卫：
-**为前台命令设置超时预算，拦截明显的交互式调用，并通过 `/stall` 查看运行时长和输出静默时间**。
+为 Pi 的 `bash` / `powershell` 调用补充超时预算，检查能明确识别的简单命令，并通过 `/stall` 查看运行时长、输出静默时间和最近结果。GUI 默认放行，`blockGui: true` 才启用严格拦截。
 
-解决的是 AI 智能体最容易死的一类问题 —— **命令不返回，模型就永远停在那里**。
+## 识别范围与边界
 
----
+守卫使用保守的词法识别，**不是完整的 Shell 解析器，也不是安全隔离机制**。只有能够确认程序和字面量参数的简单命令，才参与内置阻断判断或 SSH 改写；参数中的命令名称或说明文字不会被当作实际调用。
 
-## 📖 为什么需要这个插件？
+复杂脚本、heredoc、命令或变量替换、重定向等无法可靠识别的形式会跳过内容判断与改写，仍保留超时和运行记录。简单命令链和管道中可明确识别的调用仍接受网络及根扫描检查；交互式检查和 SSH 改写只处理单条调用。不能依靠本插件限制任意脚本的行为。
 
-Pi 的 `bash` / `powershell` 工具的 `timeout` 参数是**可选**的，不传就无限等：
+## 超时预算
 
-```javascript
-// dist/core/tools/bash.d.ts
-timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" }));
-```
+`timeout` 单位为秒。调用方提供的有效正数优先，超过 `maxTimeout` 才截到上限；扫描命令也遵守显式预算。缺失或无效的预算会按命令类型补齐：
 
-模型要等工具返回才能继续。此时 Pi 的界面仍可响应；命令没有输出，可能是正常计算、输出缓冲，也可能在等输入或子进程。cmd-guard 通过 `/stall` 报告它观察到的状态，不把静默当成死锁。
+| 配置 | 默认值 | 用途 |
+|---|---|---|
+| `probeTimeout` | 30 | 可识别的探查命令 |
+| `analysisTimeout` / `defaultTimeout` | 120 | 可识别的普通命令 |
+| `heavyTimeout` | 600 | 构建、解释器，以及无法可靠识别的复杂脚本 |
+| `scanTimeout` | 180 | 未提供有效预算的递归扫描 |
+| `maxTimeout` | 1800 | 前台超时上限 |
 
-### 实测的四种卡死场景
+不猜测毫秒，也不自动换算单位。复杂命令即使跳过内容判断，仍有超时兜底。
 
-| 场景 | 症状 | 根因 | 本插件怎么治 |
-|---|---|---|---|
-| **GUI 二进制经管道启动** | 弹窗等输入、零 stdout、进程永不退出 | 如 `die.exe`（DIE GUI 版），应改用 `diec` | 物理拦下，给出 CLI 替代 |
-| **VMware 快照类操作** | `vmrun snapshot` 对运行中客户机写快照，锁争用时无限期挂起 | VIX 同步调用 | 后台跑 + 轮询产物的提示回灌 |
-| **交互式命令无 stdin** | `ssh` 弹 `Are you sure / password` | 缺 `</dev/null`、缺 `ConnectTimeout` | 自动补 |
-| **递归扫描大目录** | `find "C:/" ...` 无输出但一直在跑 | 无界耗时 | 抬 timeout 到 ≥180s；**盘根递归（`find /` / `dir /s C:\`）直接拦下**并给替代路径 |
+## 简单命令检查
 
----
+- **交互式调用**：`blockInteractive: true` 时，检查 Bash 下明显需要交互或长期驻留的简单调用，如 `watch`、`vim`、`top`、交互式 `fzf`。已知的非交互用法，如 `vim -es`、`top -b -n 1`、`fzf --filter`，允许执行。
+- **网络设置**：内置规则检查实际程序及子命令。IP、DNS、路由、代理写入，以及接口禁用或重启等危险操作仍受限制；只读查询、启用防火墙和 `Enable-NetAdapter` 允许执行。提示描述操作影响，不依赖特定机器上的脚本。
+- **根目录递归扫描**：`blockRootScan: true` 时，只拦截实际从文件系统根或盘符根开始的递归扫描。浅层 `dir C:\`、`Get-ChildItem C:\` 允许执行；`find / -maxdepth 0`、`find / -maxdepth 1`，以及根目录上的 `Get-ChildItem -Depth 0/1` 允许执行。更深的根目录递归仍可能被拦截。非递归文件搜索不会仅因路径在根目录就被判为递归扫描。
 
-## ⚡ 它做什么
+### SSH 与 rsync
 
-### 1. 自动补 timeout（三档 + 一个下限）
+两个预设均启用 `hardenSsh: true`。只改写**单条、直接调用的字面量 `ssh` / `scp` / `sftp` / `rsync` 命令**，且要求没有 Shell 操作符、重定向或替换表达式。包装命令、显式 `-F` 配置文件、未知选项布局和复杂形式跳过改写，保留工具超时。
 
-| 命令类型 | 补的值 |
-|---|---|
-| 探查类（`where` / `Test-Path` / `Get-ChildItem`） | 30s |
-| 普通命令 | 120s |
-| 构建 / 解释器（`npm i` / `cargo build` / `python`） | 600s |
-| 递归大目录扫描 / 盘符根扫描 | ≥180s |
-
-`timeout` 一律按秒处理。有效显式值优先，但扫描下限和 `maxTimeout`（默认 1800 秒）仍适用。超过上限会截到上限并提示秒/毫秒区别，不猜测原意或自动换单位。
-
-### 2. GUI 程序默认放行（可选严格拦截）
-
-命令默认允许启动 GUI 程序，因为 IDA、x64dbg、Wireshark 等工具本来就需要窗口。GUI 名单仍然保留，用于识别工具和在需要时启用严格模式。把 `cmd-guard.rules.json` 的 `blockGui` 改成 `true` 后，命中名单的程序才会被拒绝执行，并给出 CLI 或 headless 替代方案：
+对 `ssh` / `scp` / `sftp`，分别检查并补充缺失的选项：
 
 ```text
-[cmd-guard] 已拦下：`die.exe` 是 GUI/交互式程序。
-它会弹窗等输入、零 stdout、进程永不退出；命令阻塞期间模型不在运行，物理上无法自愈。
-改用：改用 CLI 版 diec（先 --version 确认参数）
-工具真实路径怎么查：先跑 `(Get-Command <工具id> -ErrorAction SilentlyContinue).Source`，
-无值再按 TOOL-CHAIN.md 的四级递进（env → PATH → _map.json 别名 → 递归兜底）。
+-o ConnectTimeout=15
+-o ServerAliveInterval=15
+-o ServerAliveCountMax=3
 ```
 
-**只识别「命令位置」上的二进制**，不识别字符串和路径参数；默认模式下这些命令都会放行，严格模式才会拦截：
+每个选项独立处理：已有 `ConnectTimeout` 时，仍可补齐缺失的心跳选项。保留调用方已有选项、参数和数据，不追加 stdin 重定向。`rsync` 使用自己的 `--timeout=15`，已有值保持不变，不向它注入 SSH 的 `-o` 参数。
 
-| 命令 | 严格模式结果 |
-|---|---|
-| `die.exe sample.exe` | 🚫 拦下 |
-| `Test-Path D:\Tools\DIE\die.exe` | ✅ 放行（这是探测文件在不在） |
-| `echo "run die.exe first"` | ✅ 放行（这是字符串） |
-| `echo hi && die.exe sample.exe` | 🚫 拦下（链后半段也算命令位置） |
+### GUI 严格模式
 
-### 3. 有界化易挂命令
+`blockGui` 默认为 `false`。启用后，简单调用中命中 GUI 名单的程序会被拦截；已知的帮助、版本查询和控制操作（如 `procmon /Terminate`）仍允许执行。`Test-Path <gui.exe>` 和 `echo "gui.exe"` 不属于启动 GUI。
 
-- `ssh` / `scp` / `sftp` / `rsync` 自动补 `-o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3`，
-  bash 侧再补 `</dev/null` 断掉交互提示。
-  已经有 `ConnectTimeout` 的不重复注入；`echo "ssh is old"` 这种字符串不被改写。
-- 递归大目录扫描 / 盘符根扫描的 timeout 抬到 ≥180s，不会被 30s 的探查档误杀。
+GUI 名单优先级为：`guiBinaries` 手工项 > 文档派生 > 内置表。手工值为 `null` 或空字符串时，明确放行该项。可通过 `skillRoot`、`toolChainPaths` 或 `CMD_GUARD_SKILL_ROOT` 指定文档来源；兼容 `RELAB_SKILL_ROOT` / `REVERSE_SKILL_ROOT`。找不到 `TOOL-CHAIN.md` 时使用内置表；GUI 拦截关闭时，不显示缺少该文档的启动警告。
 
-- Bash 额外拦截明显需要交互或常驻的形态，如 `watch`、`vim`、`top`、交互式 `fzf` 和未指定序列编辑器的 `git rebase -i`。保留 `vim -es`、`top -b -n 1`、`fzf --filter` 等非交互用法，不把 `less`、`node` 一概拦下。新规则只检查明显的独立命令；管道、命令链、脚本等不做交互式判定，交给超时兜底。
+## 配置与命令
 
-### 4. 把坑回灌给模型（让它自己改）
+配置位于同目录的 `cmd-guard.rules.json`。VM 预设为 `cmd-guard.rules.vm.json`，复制为前者即可使用；其探查、分析、构建和扫描预算分别为 60、180、900、240 秒。
 
-命中下面这些模式时，在工具结果里追加一段提示，模型看得到就会改：
-
-- 单条命令串了 >8 段（任一段等交互或打错路径，整条就死）
-- 同一条命令里混用 POSIX 路径与 Windows 路径（Git-Bash 下 `/tmp` 实为 `C:\tmp`）
-- PowerShell 的 `start` 不带 `/b`
-- `vmrun snapshot/suspend`
-
-### 5. 长时间运行时怎么看
-
-- **底栏**：不显示常驻汇总或运行中状态；拦截通知和命令弹窗照常显示。
-- **`/stall`**：查看命令摘要、运行时长、静默时间、超时预算和最近结果（含超时或中断）。`◐` 表示较久无输出，`⚠` 表示已过预算但工具还没返回。
-- **能力边界**：不按静默强杀，不自动转后台，不覆盖 Pi 自带工具。Windows 上如果子进程仍占着输出管道，Pi 的工具调用仍可能超过预算；MCP 无响应和模型流中断也不在本插件范围。
-
-参考：[`pi-prevent-stuck`](https://github.com/lukeramsden/pi-prevent-stuck) 的非 TTY 实测清单、[Pi #11743](https://github.com/earendil-works/pi/issues/11743) 的超时单位反馈、[Pi #11613](https://github.com/earendil-works/pi/issues/11613) 与 [OpenCode #20902](https://github.com/anomalyco/opencode/issues/20902) 的子进程输出管道问题。
-
----
-
-## ★ GUI 名单从哪来（这是本插件最关键的设计）
-
-**优先级：rules.json 手工项 > 文档派生 > 内置兜底表**
-
-文档派生的意思是：**插件去读你技能包里的 `TOOL-CHAIN.md`，把它写的
-`` `foo.exe`→`foo-cli` `` 变成一条拦截规则。**
-
-```
-你改了 TOOL-CHAIN.md  →  不用改任何代码  →  拦截自动生效
-```
-
-这条设计的后果：
-
-- **加工具不用碰插件。** 文档里加一行 `` `foo.exe`→`foo-cli` ``，下次调用就认得。
-- **文档删了，拦截自动消失。** 不存在「清单过时」这个问题。
-- **换机零配置。** 插件会自动往上找含 `TOOL-CHAIN.md` 的目录（现为 `skillpack/TOOL-CHAIN.md`，早期是仓根 `TOOL-CHAIN.md`，两种布局都认），
-  找不到再依次试环境变量 `RELAB_SKILL_ROOT` / `REVERSE_SKILL_ROOT`、习惯位置 `C:\relab2`。
-  全找不到时**只退到内置兜底表，并在启动横幅和会话通知里明说「★未找到 TOOL-CHAIN.md」**。
-
-> ⚠️ 明确不做的事：**不依赖任何 `tool-index.md` 之类的生成物。**
-> 那类文件是旧框架的产物，路径在换机后不存在，读不到会导致 GUI 拦截**整个静默失效** ——
-> 这是最坏的失败模式（看起来一切正常，其实已经不拦了）。所以宁可少拦，也不静默。
-
-### 怎么确认它到底认得什么
-
-```
-/guard          # 看状态：规则来源、条数、当前阈值
-/guard rules    # 打印完整名单，派生项会标「（来源 TOOL-CHAIN.md）」
-```
-
----
-
-## ⚙️ 配置：`cmd-guard.rules.json`
-
-每个字段在文件里都带 `_说明` 注释，就地可读。常用的几个：
-
-| 字段 | 默认 | 说明 |
+| 字段 | 默认 | 含义 |
 |---|---|---|
-| `enforce` | `true` | `false` = 不执行 Shell 规则的阻断；超时和 SSH 参数调整仍生效 |
-| `blockInteractive` | `true` | Bash 下的交互式命令拦截，可单独关闭 |
-| `maxTimeout` | `1800` | Bash / PowerShell 前台超时上限（秒） |
-| `noOutputStallSeconds` | `90` | 无输出更新超过该秒数时在 `/stall` 报告中提示静默；不会自动中断 |
-| `blockGui` | `false` | 默认放行 GUI 程序；设为 `true` 才物理拦截 GUI 名单中的程序 |
-| `hardenSsh` | `true` | `false` = 不改写 ssh/scp |
-| `guiBinaries` | `{}` | 手工项。值 = 替代提示语；写 `null` = **明确不拦这一条** |
-| `toolChainPaths` | `[]` | 额外再从哪些 Markdown 派生 |
-| `skillRoot` | `null` | 留空 = 自动探测 |
-| `allow` | `["cmd-guard-skip"]` | 命令含其中任一子串则整条跳过守卫 |
+| `enforce` | `true` | 关闭后，Shell 规则只提示；超时与 SSH 参数调整仍生效 |
+| `blockInteractive` | `true` | 检查 Bash 简单交互式调用 |
+| `blockRootScan` | `true` | 检查实际的根目录递归扫描 |
+| `blockGui` | `false` | 显式启用 GUI 严格模式 |
+| `hardenSsh` | `true` | 为符合识别条件的直接调用补充缺失选项 |
+| `stallSeconds` | `240` | 标记长时间运行，用于报告 |
+| `noOutputStallSeconds` | `90` | 标记长时间无输出，用于报告 |
+| `allow` | `["cmd-guard-skip"]` | 命令包含任一指定子串时，整条跳过守卫 |
 
-**当前默认策略**：GUI 程序允许启动，timeout、交互式命令、盘根扫描和网络危险操作继续受保护。需要严格防止 GUI 从 Shell 启动时，把 `blockGui` 改为 `true`，然后运行 `/guard reload`。
+配置通常在 30 秒内自动重读。**每次执行 `/guard`（含子命令）都会重新加载配置**；状态包含 `hardenSsh`。
 
-改完 30 秒内自动生效，或 `/guard reload` 立即生效。
-
----
-
-## 🎛️ 命令
+可用 `disableDeny` 按规则 ID 关闭特定网络检查。`denyRules` 自定义正则匹配规范化后的简单调用文本，建议用 `^程序名` 锚定调用；它们由用户配置，独立于内置检查。
 
 | 命令 | 作用 |
 |---|---|
-| `/guard` | 看状态：规则来源、条数、各档 timeout、enforce / blockGui 开关 |
-| `/guard rules` | 打印完整 GUI 名单（派生项标来源） |
-| `/guard reload` | 立刻重读 rules.json 与文档 |
-| `/guard on` · `/guard off` | 本次会话内开关 |
-| `/stall` | 命令执行健康报告 + 处置处方 |
+| `/guard` | 重读配置并显示规则来源、超时预算和各开关状态 |
+| `/guard rules` | 重读配置并显示 GUI 名单及来源 |
+| `/guard reload` | 立即重读配置与文档并报告状态 |
+| `/guard on` · `/guard off` | 重读配置后切换本次会话的守卫开关 |
+| `/stall` | 报告命令摘要、运行时长、静默时间、预算和最近结果 |
 
-彻底关闭：设环境变量 `CMD_GUARD=0` 后重启 pi。
+`/stall` 只报告观察到的事实，不附加任务安排或工具路由建议。静默可能来自正常计算、输出缓冲或等待输入，不代表死锁；插件不会因静默自动中断命令，也不会自动转后台。Windows 子进程占用输出管道时，工具仍可能超过预算；MCP 无响应和模型流中断也不在本插件的处理范围。
 
----
+设环境变量 `CMD_GUARD=0` 后重启 Pi，可彻底关闭插件。
 
-## 🧪 自测
+## 安装与验证
 
+```powershell
+pi install "C:/path/to/agent-plugins-lab/plugins/pi/cmd-guard"
 ```
+
+也可把整个 `cmd-guard` 目录复制到 `~/.pi/agent/extensions/cmd-guard/`，保留 `lib/` 和包清单；随后执行 `/reload`，再用 `/guard` 查看生效配置。
+
+```text
 node smoke-cmd-guard.mjs
 ```
 
-用模拟 Pi API 驱动插件，不执行用例中的命令。默认使用 Node.js 22.19+ 的 TypeScript 加载，检测到 Pi 独立安装的 jiti 则用 jiti。也可将 `PI_JITI_ANCHOR` 指向能解析 `jiti` 的 Pi 安装内的绝对文件路径。
+自测使用模拟 Pi API，不执行用例中的命令。需要 Node.js 22.19+；Pi SDK 加载另由仓库的 `test:sdk` 检查。
 
-覆盖的关键行为（每一条都对应一个曾经出过问题的判定）：
+## 许可
 
-- `Test-Path <gui.exe>` / `echo "<gui.exe>"` **不能**被误拦（位置识别）
-- 链式命令后半段的 GUI 遵循 `blockGui` 配置
-- `idat.exe` 这类 headless 工具**明确不拦**
-- 提示语带「（来源 TOOL-CHAIN.md）」= 文档驱动真的生效了
-- 递归扫描下限、有效显式预算和异常 timeout 上限
-- 交互式命令拦截、无交互替代和带引号的命令文本不误伤
-- 起始空更新不刷新静默，结束事件清理运行状态
-- `echo "ssh is old"` 不被改写；已有 `ConnectTimeout` 不重复注入
-
----
-
-## 🔌 安装
-
-```powershell
-pi install "C:/path/to/agent-plugins/plugins/pi/cmd-guard" # 先克隆仓库，只安装本插件
-```
-
-或手动：把 `cmd-guard.ts`、`cmd-guard.rules.json` 复制到 `~/.pi/agent/extensions/`。
-
-装完用 `/guard` 确认一下规则来源。**如果显示「★未找到 TOOL-CHAIN.md」，
-说明这台机器上技能包不在已知位置** —— 设 `RELAB_SKILL_ROOT` 指向技能包根，或在
-rules.json 里写 `toolChainPaths`。不处理也能用（内置兜底表还在），只是少了文档派生。
-
-
----
-
-## 📄 许可
-
-MIT。见 `LICENSE`。
-## Seep 回流修复（2026-11-02）
-
-通用版同步：只读搜索首段误判、SSH 每段独立补超时、rsync 使用自己的
-`--timeout` 参数、自定义禁手可被 `disableDeny` 关闭、ESM 目录解析、移除历史机器路径探测。
-`CMD_GUARD_SKILL_ROOT` 与旧环境变量仍可显式指定文档根；没有工具链文档时明确降级。
-
-通用版不实现 Seep 的任务授权或风险预算。`allow` 的整条命令放行语义不变。
+MIT，见 `LICENSE`。
