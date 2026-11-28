@@ -4,14 +4,17 @@
 
 ## Pi 插件
 
-| 插件 | 功能 | 入口 |
-|---|---|---|
-| [`persona`](plugins/pi/persona/README.md) | 按当前对话选择 Markdown 人设 | `/persona` |
-| [`rewind`](plugins/pi/rewind/README.md) | 回退到消息之前，或撤销最后一条纯文本回复 | `/rewind`、`/undo-reply` |
-| [`remote`](plugins/pi/remote/README.md) | 查看局域网和 Tailscale 连接信息，管理 pi-web 远程配置 | `/remote` |
-| [`cmd-guard`](plugins/pi/cmd-guard/README.md) | 命令超时兜底、GUI 拦截、命令运行健康报告 | `/guard`、`/stall` |
-| [`retry-level`](plugins/pi/retry-level/README.md) | 调整模型请求重试档位 | `/retry` |
-| [`lab`](plugins/pi/lab/README.md) | 保存常用语，添加 `lab:` 前缀填入输入框 | `/lab`、`/LAB` |
+| 插件 | 安装短名 | 功能 | 入口 |
+|---|---|---|---|
+| [`persona`](plugins/pi/persona/README.md) | `pi-persona` | 按当前对话选择 Markdown 人设 | `/persona` |
+| [`persona-old`](plugins/pi/persona-old/README.md) | `pi-persona-old` | 人设插件的历史完整版，与 `persona` 二选一 | `/persona` |
+| [`rewind`](plugins/pi/rewind/README.md) | `pi-rewind` | 回退到消息之前，或撤销最后一条纯文本回复 | `/rewind`、`/undo-reply` |
+| [`remote`](plugins/pi/remote/README.md) | `pi-remote` | 查看局域网和 Tailscale 连接信息，管理 pi-web 远程配置 | `/remote` |
+| [`cmd-guard`](plugins/pi/cmd-guard/README.md) | `pi-cmd-guard` | 命令超时兜底、GUI 拦截、命令运行健康报告 | `/guard`、`/stall` |
+| [`retry-level`](plugins/pi/retry-level/README.md) | `pi-retry-level` | 调整模型请求重试档位 | `/retry` |
+| [`lab`](plugins/pi/lab/README.md) | `pi-lab` | 保存常用语，添加 `lab:` 前缀填入输入框 | `/lab`、`/LAB` |
+
+「安装短名」就是 `settings.json` 里 `packages` 会出现的字符串，也是 Pi Web 插件页显示的名称。
 
 三个原先放在 `pi-seep-ext` 中的扩展现在已经拆成三个包。它们共享思路，但安装和加载互相独立。
 
@@ -19,18 +22,75 @@
 
 ## 安装
 
-克隆仓库后，只安装需要的插件：
+### 推荐：用安装脚本（安装后显示短名）
 
-```bash
-pi install ./plugins/pi/persona
-pi install ./plugins/pi/rewind
-pi install ./plugins/pi/remote
-pi install ./plugins/pi/cmd-guard
-pi install ./plugins/pi/retry-level
-pi install ./plugins/pi/lab
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File .\scripts\install-pi-plugins.ps1
 ```
 
-只执行你需要的那一行。想一次装齐，可在仓库根目录运行 `pi install .`，或直接运行 `pi install git:github.com/gthubtom1/agent-plugins@main`。不要同时安装根包和同名独立包。
+```bash
+# Linux / macOS
+./scripts/install-pi-plugins.sh
+```
+
+脚本会在 agent 目录下为每个插件建立同名链接（Windows 用 Junction，其他平台用符号链接），
+再按这个名字安装，所以 `settings.json` 里记录的是干净的短名：
+
+```json
+{
+  "packages": [
+    "pi-cmd-guard",
+    "pi-retry-level",
+    "pi-remote",
+    "pi-lab"
+  ]
+}
+```
+
+Pi Web 的插件页和 `pi list` 直接显示这个字符串，短名比长路径好认得多。
+插件升级只需在仓库里 `git pull`，链接不用重建。
+
+常用参数：
+
+```powershell
+# 只查看每个插件的安装状态，不做修改
+.\scripts\install-pi-plugins.ps1 -List
+
+# 只装其中几个
+.\scripts\install-pi-plugins.ps1 -Plugins pi-cmd-guard,pi-lab
+
+# 装到别的 agent 目录（DSH 或自定义 profile）
+.\scripts\install-pi-plugins.ps1 -AgentDir 'D:\other\agent'
+```
+
+默认安装 `pi-cmd-guard`、`pi-retry-level`、`pi-remote`、`pi-lab`、`pi-rewind`。
+`pi-persona` 和 `pi-persona-old` 都注册 `/persona`，脚本不会默认装任何一个，需要时显式指定，且两者只能选一个。
+
+### 为什么不要直接 `pi install ./plugins/pi/xxx`
+
+`pi install` 会把来源路径写进 `settings.json` 的 `packages` 数组，而界面显示的就是这个字符串。
+直接按相对路径安装时，写进去的是相对路径；换一个目录再装一次，就可能变成
+`plugin-src\agent-plugins\plugins\pi\cmd-guard` 这样的长串。同一台机器上装两次，还会出现
+同一个插件被登记两次、被加载两次的问题。
+
+想手动装单个插件，请先建链接再按名字装，效果和脚本一致：
+
+```powershell
+# Windows：在 agent 目录下建 Junction，再按名字安装
+$agent = "$HOME\.pi\agent"
+New-Item -ItemType Junction -Path "$agent\pi-lab" -Target "<仓库路径>\plugins\pi\lab"
+pi install "$agent\pi-lab"
+```
+
+```bash
+# Linux / macOS
+agent="$HOME/.pi/agent"
+ln -s "<仓库路径>/plugins/pi/lab" "$agent/pi-lab"
+pi install "$agent/pi-lab"
+```
+
+如果已经有长路径条目，运行一次安装脚本会自动清理并改成短名。
 
 安装后重新打开 Pi 会话，或在已有会话执行 `/reload`。每个插件目录的 README 记录了插件用途、命令和单独安装方法。
 
