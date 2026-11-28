@@ -149,10 +149,38 @@ for name in $PLUGINS; do
     fi
 done
 
+# Bash 交互与登录 shell 都需设置；登录配置遵循 Bash 的实际读取优先级。
+configure_remote_hostname() {
+    local profile="$HOME/.profile"
+    local startup_file
+    local setting='export PI_WEB_HOSTNAME=0.0.0.0'
+    if [ -f "$HOME/.bash_profile" ]; then
+        profile="$HOME/.bash_profile"
+    elif [ -f "$HOME/.bash_login" ]; then
+        profile="$HOME/.bash_login"
+    fi
+
+    for startup_file in "$HOME/.bashrc" "$profile" "${ZDOTDIR:-$HOME}/.zshrc"; do
+        if ! grep -qxF "$setting" "$startup_file" 2>/dev/null; then
+            if ! printf '\n%s\n' "$setting" >> "$startup_file"; then
+                echo "Failed to persist PI_WEB_HOSTNAME in $startup_file" >&2
+                return 1
+            fi
+        fi
+    done
+    echo "Configured PI_WEB_HOSTNAME=0.0.0.0 for future Bash and Zsh sessions."
+}
+
 for name in $PLUGINS; do
     [ -e "$AGENT_DIR/$name" ] || continue
     # 传绝对路径，让 Pi 规范成相对 agentDir 的短名后写入 settings.json
-    pi install "$AGENT_DIR/$name" >/dev/null 2>&1 || true
+    if ! pi install "$AGENT_DIR/$name"; then
+        echo "Failed to install: $name" >&2
+        exit 1
+    fi
+    if [ "$name" = "pi-remote" ]; then
+        configure_remote_hostname || exit 1
+    fi
     echo "Installed: $name"
 done
 

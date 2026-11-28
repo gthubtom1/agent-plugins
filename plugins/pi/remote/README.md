@@ -14,28 +14,27 @@ pi install --local "/path/to/agent-plugins/plugins/pi/remote"
 
 只试一次可用 `pi -e "/path/to/agent-plugins/plugins/pi/remote"`。无需安装其他扩展。pi-web 默认显示网址；需要终端二维码时，可在本包目录运行 `npm install --legacy-peer-deps` 安装可选的 `qrcode-generator`，不装也能使用其他功能。
 
-## Windows：安装时一次配好手机访问
+## 安装时默认配好手机访问
 
-普通 `pi install` 只登记插件，不会修改 Windows 的网络设置。**想在安装的同时配置手机访问**，就在以后用来启动 pi-web 的 PowerShell 中，从本仓库根目录运行下面整段。它只需执行一次；之后仍然直接输入 `pi-web`，不需要桌面脚本或额外参数。
-
-> 启用后，pi-web 将在所有 IPv4 网卡上监听。只在可信局域网和受访问控制的 Tailscale 网络中使用，保留登录密码，不要做公网端口转发。下面的命令不修改密码或防火墙。
+使用仓库安装脚本安装 `pi-remote` 时，会在安装成功后自动持久化 `PI_WEB_HOSTNAME=0.0.0.0`。之后仍然直接输入 `pi-web`。Windows 同时配置用户环境变量、Windows PowerShell 和 PowerShell 7 的启动配置；Linux / macOS 配置 Bash 和 Zsh 的启动文件。重复安装不会重复追加相同设置。
 
 ```powershell
-pi install .\plugins\pi\remote
-if ($LASTEXITCODE -ne 0) { throw 'Remote 安装失败，未修改 pi-web 配置。' }
-
-# 保存 Windows 用户级设置，并让 PowerShell 启动时重新读取它，避免继承旧值。
-[Environment]::SetEnvironmentVariable('PI_WEB_HOSTNAME', '0.0.0.0', 'User')
-$profilePath = $PROFILE.CurrentUserAllHosts
-$profileLine = '$env:PI_WEB_HOSTNAME = [Environment]::GetEnvironmentVariable(''PI_WEB_HOSTNAME'', ''User'') # pi-remote'
-New-Item -ItemType Directory -Path (Split-Path -Parent $profilePath) -Force | Out-Null
-if (!(Test-Path -LiteralPath $profilePath) -or (Get-Content -LiteralPath $profilePath) -notcontains $profileLine) {
-    Add-Content -LiteralPath $profilePath -Value @('', $profileLine)
-}
-$env:PI_WEB_HOSTNAME = '0.0.0.0'
+# Windows：只安装 remote，自动配置监听
+powershell -ExecutionPolicy Bypass -File .\scripts\install-pi-plugins.ps1 -Plugins pi-remote
 ```
 
-已经安装插件时，跳过前两行，只执行配置部分即可。PowerShell 7 和 Windows PowerShell 5.1 使用不同的启动配置；如果两者都用，请各执行一次配置部分。
+```bash
+# Linux / macOS
+./scripts/install-pi-plugins.sh --plugins pi-remote
+```
+
+普通 `pi install` 只登记插件，不会运行仓库安装脚本。Windows 上已经安装插件、只需修复监听时，从仓库根目录运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\configure-pi-web.ps1
+```
+
+安装脚本启用所有 IPv4 网卡监听，不修改密码、防火墙、路由或 Tailscale 配置。局域网可用电脑的局域网地址；异地可通过已经连通的 Tailscale 网络访问。公网域名或公网 IP 仍需配置对应的 HTTPS 入口和网络路由，绑定 `0.0.0.0` 不会自动建立公网入口。保留登录认证。
 
 1. 如果 pi-web 已在运行，在它原来的终端按 `Ctrl+C` 停掉，再在 PowerShell 输入 `pi-web`。这一步只需做一次，监听地址不能在服务运行中更改。
 2. 手机与电脑连同一个 Wi-Fi：在 pi-web 输入 `/remote lan`，在手机打开它给出的局域网地址。出门时，电脑和手机连接同一个 tailnet，再用 `/remote tailscale` 给出的地址。

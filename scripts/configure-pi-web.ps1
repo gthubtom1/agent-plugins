@@ -1,0 +1,34 @@
+<#
+.SYNOPSIS
+    Persist pi-web's all-interface listener for normal future pi-web launches.
+.DESCRIPTION
+    Does not restart a running server or change passwords, firewall rules or routing.
+    May also be run on its own to repair an existing pi-remote installation.
+#>
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+
+# User environment alone is insufficient when an existing terminal application
+# keeps passing its old environment to new tabs. Refresh both PowerShell profiles.
+[Environment]::SetEnvironmentVariable('PI_WEB_HOSTNAME', '0.0.0.0', 'User')
+$env:PI_WEB_HOSTNAME = '0.0.0.0'
+$profileLine = '$env:PI_WEB_HOSTNAME = [Environment]::GetEnvironmentVariable(''PI_WEB_HOSTNAME'', ''User'') # pi-remote'
+$documents = [Environment]::GetFolderPath('MyDocuments')
+$profilePaths = @(
+    (Join-Path $documents 'WindowsPowerShell\profile.ps1'),
+    (Join-Path $documents 'PowerShell\profile.ps1'),
+    $PROFILE.CurrentUserAllHosts
+) | Select-Object -Unique
+
+foreach ($profilePath in $profilePaths) {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $profilePath) -Force | Out-Null
+    if (!(Test-Path -LiteralPath $profilePath) -or
+        (Get-Content -LiteralPath $profilePath -Encoding UTF8) -notcontains $profileLine) {
+        Add-Content -LiteralPath $profilePath -Encoding UTF8 -Value @('', $profileLine)
+    }
+}
+
+Write-Host 'pi-web: PI_WEB_HOSTNAME=0.0.0.0 saved for this Windows user and both PowerShell editions.'
+Write-Host 'Restart pi-web in a new terminal to apply. LAN and Tailscale still require a reachable network path.'

@@ -51,6 +51,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-pi-plugins.ps1
 Pi Web 的插件页和 `pi list` 直接显示这个字符串，短名比长路径好认得多。
 插件升级只需在仓库里 `git pull`，链接不用重建。
 
+安装脚本在 `pi-remote` 安装成功后，会自动持久化 `PI_WEB_HOSTNAME=0.0.0.0`。重开终端并重启 pi-web 后，照常运行 `pi-web` 即可监听所有 IPv4 网卡。局域网使用电脑 IP，异地使用已连通的 Tailscale；公网域名访问仍需已有的 HTTPS 入口和路由。脚本不修改密码、防火墙或路由。详见 [remote 安装说明](plugins/pi/remote/README.md#安装时默认配好手机访问)。
+
 常用参数：
 
 ```powershell

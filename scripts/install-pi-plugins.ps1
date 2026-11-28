@@ -145,6 +145,8 @@ if (-not (Test-Path $AgentDir)) {
 # 先清掉指向同一插件目录的长路径旧条目，避免同一插件被加载两次。
 $toRemove = @()
 foreach ($entry in $installed) {
+    # Registry/git sources can contain slashes but are not filesystem paths.
+    if ($entry -match '^(npm|git|github|https?|ssh|builtin):') { continue }
     if ($entry -match '\\' -or $entry -match '/') {
         $resolved = if ([System.IO.Path]::IsPathRooted($entry)) { $entry } else { Join-Path $AgentDir $entry }
         foreach ($name in $Plugins) {
@@ -212,6 +214,12 @@ foreach ($name in $Plugins) {
     # Pass the absolute path so Pi normalizes it to a path relative to agentDir,
     # which is exactly the short name written to settings.json.
     & pi install $link 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Installation failed: $name (exit $LASTEXITCODE)."
+    }
+    if ($name -eq 'pi-remote') {
+        & (Join-Path $PSScriptRoot 'configure-pi-web.ps1')
+    }
     Write-Host "Installed: $name"
 }
 
