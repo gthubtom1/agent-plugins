@@ -30,5 +30,16 @@ foreach ($profilePath in $profilePaths) {
     }
 }
 
+. (Join-Path $PSScriptRoot 'pi-web-launchers.ps1')
+$launchers = @(Get-Command pi-web.ps1, pi-web.cmd -All -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty Source -Unique)
+foreach ($launcher in $launchers) {
+    Update-PiWebLauncher -Path $launcher
+    Write-Host "pi-web launch configuration ready: $launcher"
+}
+if (!$launchers.Count) {
+    Write-Warning 'pi-web launchers not found. Run this configuration again after installing pi-web.'
+}
+
 Write-Host 'pi-web: PI_WEB_HOSTNAME=0.0.0.0 saved for this Windows user and both PowerShell editions.'
-Write-Host 'Restart pi-web in a new terminal to apply. LAN and Tailscale still require a reachable network path.'
+Write-Host 'Restart pi-web to apply, including in the current terminal. LAN and Tailscale still require a reachable network path.'
